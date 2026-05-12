@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# codx -- codex launcher (bundled with dotpanel; thin shell over kernel secrets)
+# Usage: codx [--<variant> | --variant NAME] [-- codex args...]
+#
+# `<variant>` is any name declared under `.dotpanel.toml [backends.codex.variants]`.
+# Use `--` to separate wrapper flags from codex flags when codex flags collide.
+set -euo pipefail
+
+VARIANT=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --variant)
+            VARIANT="${2:?--variant requires NAME}"; shift 2 ;;
+        help|--help|-h)
+            sed -n '2,6s/^# \{0,1\}//p' "$0"; exit 0 ;;
+        --) shift; break ;;
+        --*)
+            # Any --<name> before `--` is treated as a variant. Use `--` to
+            # pass codex flags explicitly (e.g. `codx --andy -- login`).
+            VARIANT="${1#--}"; shift ;;
+        *)  break ;;
+    esac
+done
+
+VARIANT="${VARIANT:-andy}"
+exec dotpanel secrets run --backend codex --variant "$VARIANT" -- codex "$@"

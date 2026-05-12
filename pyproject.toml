@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dotpanel"
+version = "0.3.0"
+description = "Personal Agent Workspace control plane: protocol library + harness adapter generator + substrate self-description"
+requires-python = ">=3.12"
+readme = "README.md"
+authors = [{ name = "hioTEC", email = "pjonix@outlook.com" }]
+license = "Apache-2.0"
+keywords = ["agent", "workspace", "claude-code", "codex", "kimi", "protocol", "harness", "dotpanel"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
+
+[project.scripts]
+dotpanel = "dotpanel.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dotpanel*"]
+
+[tool.setuptools]
+include-package-data = true

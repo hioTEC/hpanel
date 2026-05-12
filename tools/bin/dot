@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# dot -- shorthand for dotpanel sync
+exec python3 -m dotpanel sync "$@"

@@ -39,12 +39,11 @@ Persona content stays out of this repo. dotpanel ships only the universal protoc
 | `implement-pipeline` | large multi-session runs | State machine: code → review → verify → ship → wrap |
 | `session-guardrails` | `implement-pipeline`, `/plan` | Auto-checkpoint at 30/50/100 turns, scope drift, ping-pong |
 
-### Internal reference (2)
+### Internal reference (1)
 
 | Skill | Purpose |
 |---|---|
 | `investigate` | Root-cause analysis; 3 failed hypotheses → escalate to human |
-| `improve-skills` | Scan journals for friction patterns → propose protocol updates |
 
 ### Main workflow
 

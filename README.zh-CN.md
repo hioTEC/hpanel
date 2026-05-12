@@ -39,12 +39,11 @@ Persona 内容不在本 repo 中。dotpanel 只负责通用 protocol + 渲染 ha
 | `implement-pipeline` | 大型多 session run | 状态机：code → review → verify → ship → wrap |
 | `session-guardrails` | `implement-pipeline`、`/plan` | 30/50/100 turn 自动 checkpoint |
 
-### 内部参考（2 个）
+### 内部参考（1 个）
 
 | Skill | 作用 |
 |---|---|
 | `investigate` | root cause 分析；3 次假设失败 → 升级给人 |
-| `improve-skills` | 扫描 journal 中的摩擦模式 → 提议 protocol 更新 |
 
 ### 主流程
 

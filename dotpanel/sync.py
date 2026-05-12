@@ -827,9 +827,12 @@ def _phase_reload(state: SyncState) -> int:
         return 0
 
     print(f"OK  reload: pip install -e {src}")
+    # --break-system-packages: required on PEP 668 distros (Debian 12+,
+    # Ubuntu 24.04+) where the system Python is EXTERNALLY-MANAGED; no-op
+    # on systems without that marker.
     cp = subprocess.run(
         [sys.executable, "-m", "pip", "install", "-e", str(src),
-         "--quiet"],
+         "--quiet", "--break-system-packages"],
         check=False,
     )
     if cp.returncode != 0:

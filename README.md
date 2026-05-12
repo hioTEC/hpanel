@@ -73,11 +73,14 @@ dotpanel init --persona-root ~/.persona
 # 4. Render harness adapters
 dotpanel configure --harness all
 
-# 5. Verify
+# 5. Open a new shell (or `source ~/.config/dotpanel/path.sh`)
+#    so `claw` / `codx` / `dot` land on PATH
+
+# 6. Verify
 dotpanel doctor && dotpanel audit
 ```
 
-After step 4, `claude` / `codex` / `kimi` auto-load the generated wrappers which reference your persona + the universal protocol.
+After step 4, `claude` / `codex` / `kimi` auto-load the generated wrappers which reference your persona + the universal protocol. For day-to-day updates across machines, run `dotpanel sync pull` — it pulls configured repos, reinstalls dotpanel if its source changed, and re-runs `configure --harness all`.
 
 ## CLI
 
@@ -90,7 +93,8 @@ After step 4, `claude` / `codex` / `kimi` auto-load the generated wrappers which
 | `dotpanel audit` | Structural checks (CI-safe) |
 | `dotpanel configure --harness all` | Render `~/.claude/`, `~/.codex/`, `~/.kimi/` |
 | `dotpanel configure --check` | Dry-run validation |
-| `dotpanel sync push\|pull\|status\|diff` | Sync configured repos with leak checks |
+| `dotpanel sync pull` | Multi-phase: pull repos → reinstall dotpanel if updated → re-`configure --harness all` |
+| `dotpanel sync push\|status\|diff` | Per-repo leak-checked push; read-only status/diff |
 | `dotpanel secrets list\|run\|export\|edit` | Scoped secrets API (age-encrypted) |
 | `dotpanel context` | Resolve identity + machine + path anchors |
 | `dotpanel ssh render` | Generate SSH config from machines.yaml |

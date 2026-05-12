@@ -650,8 +650,8 @@ def cmd_doctor(paths: DotpanelPaths,
         resolved = shutil.which(launcher)
         if resolved is None:
             warnings.append(
-                f"`{launcher}` not on PATH. Source ~/.config/dotpanel/path.sh "
-                f"(run `dotpanel configure --inject-shell-rc` once)."
+                f"`{launcher}` not on PATH. Open a new shell, or "
+                f"`source ~/.config/dotpanel/path.sh` in this one."
             )
             continue
         resolved_path = Path(resolved).resolve()

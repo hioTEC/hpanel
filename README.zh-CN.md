@@ -73,11 +73,14 @@ dotpanel init --persona-root ~/.persona
 # 4. 渲染 harness 适配器
 dotpanel configure --harness all
 
-# 5. 验证
+# 5. 开一个新 shell（或 `source ~/.config/dotpanel/path.sh`）
+#    让 `claw` / `codx` / `dot` 进入 PATH
+
+# 6. 验证
 dotpanel doctor && dotpanel audit
 ```
 
-完成第 4 步后，启动 `claude` / `codex` / `kimi` 会自动加载生成的 wrapper，引用你的 persona + 通用 protocol。
+完成第 4 步后，启动 `claude` / `codex` / `kimi` 会自动加载生成的 wrapper，引用你的 persona + 通用 protocol。日常多机同步使用 `dotpanel sync pull`——它会拉取配置的 repo、若 dotpanel 源码变更则重新安装、并重新执行 `configure --harness all`。
 
 ## CLI 命令
 
@@ -90,7 +93,8 @@ dotpanel doctor && dotpanel audit
 | `dotpanel audit` | 结构性检查（CI 安全） |
 | `dotpanel configure --harness all` | 渲染 `~/.claude/`、`~/.codex/`、`~/.kimi/` |
 | `dotpanel configure --check` | 干跑验证 |
-| `dotpanel sync push\|pull\|status\|diff` | 同步配置 repo（含 leak 检查） |
+| `dotpanel sync pull` | 多阶段：拉取 repo → 若 dotpanel 更新则重装 → 重跑 `configure --harness all` |
+| `dotpanel sync push\|status\|diff` | 逐 repo leak 检查后推送；只读 status/diff |
 | `dotpanel secrets list\|run\|export\|edit` | 作用域 secrets API（age 加密） |
 | `dotpanel context` | 解析身份 + 机器 + 路径锚点 |
 | `dotpanel ssh render` | 从 machines.yaml 生成 SSH 配置 |

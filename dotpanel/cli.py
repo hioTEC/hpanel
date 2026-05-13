@@ -109,8 +109,8 @@ CLAUDE_EXCLUDED = (
 CODEX_EXCLUDED = (
     "sessions", "history.jsonl", "log", "archived_sessions", "shell_snapshots",
     "vendor_imports", "scheduled_tasks.lock", "plugins", "rules", "memories",
-    ".personality_migration", ".tmp", "tmp", "installation_id", "version.json",
-    "skills/.system",  # per ADR-3 (Codex runtime cache)
+    "skills", ".personality_migration", ".tmp", "tmp", "installation_id",
+    "version.json",
 )
 CODEX_EXCLUDED_GLOBS = ("*.sqlite", "*.sqlite-shm", "*.sqlite-wal", "*.sqlite-journal")
 KIMI_EXCLUDED = (
@@ -189,6 +189,10 @@ class DotpanelPaths:
         return self.home / ".codex"
 
     @property
+    def agents_home(self) -> Path:
+        return self.home / ".agents"
+
+    @property
     def kimi_home(self) -> Path:
         return self.home / ".kimi"
 
@@ -201,6 +205,17 @@ class DotpanelPaths:
             return self.codex_home
         if harness == "kimi":
             return self.kimi_home
+        raise ValueError(f"unknown harness: {harness}")
+
+    def skills_root(self, harness: str, override: Path | None = None) -> Path | None:
+        if harness == "claude":
+            return self.output_root("claude", override) / "skills"
+        if harness == "codex":
+            if override:
+                return override / "agents" / "skills"
+            return self.agents_home / "skills"
+        if harness == "kimi":
+            return None
         raise ValueError(f"unknown harness: {harness}")
 
 
@@ -696,6 +711,24 @@ def cmd_doctor(paths: DotpanelPaths,
                             "`secrets export --scope llm`) will NOT have this key."
                         )
 
+    # Invariant 16: VSCode Codex extension needs server-env-setup so the
+    # extension host inherits env_key-based LLM credentials.
+    for vscode_home_name in (".vscode-server", ".vscode-server-insiders"):
+        vscode_home = paths.home / vscode_home_name
+        extensions_dir = vscode_home / "extensions"
+        if not extensions_dir.is_dir():
+            continue
+        has_codex_extension = any(
+            child.is_dir() and child.name.startswith("openai.chatgpt-")
+            for child in extensions_dir.iterdir()
+        )
+        if has_codex_extension and not (vscode_home / "server-env-setup").is_file():
+            warnings.append(
+                f"{vscode_home}/server-env-setup missing. VSCode Codex extension "
+                "may not inherit LLM env keys; install a setup file that runs "
+                "`dotpanel secrets export --scope llm` before vscode-server starts."
+            )
+
     # Invariant 12: multi-checkout detection (WARN). `pip show dotpanel`
     # should show exactly one editable install. This is best-effort: the
     # active editable install plus an in-repo legacy `dotpanel.egg-info/`
@@ -812,7 +845,9 @@ supported_harnesses: [claude, codex]
 ```
 
 After dropping a skill file here, run `dotpanel configure --harness all`
-to render the new wrapper into `~/.claude/skills/<name>/SKILL.md` etc.
+to render the new wrapper into harness-native skill homes such as
+`~/.claude/skills/<name>/SKILL.md` and `~/.agents/skills/<name>/SKILL.md`
+for Codex.
 
 Skills can be selectively disabled or harness-scoped in `.dotpanel.toml`:
 
@@ -1009,7 +1044,14 @@ def _configure_one_file(rel_path: str, content: str, output_root: Path, harness:
                         result: ConfigureResult) -> None:
     """Write rel_path under output_root, respecting banner/conflict rules."""
     target = output_root / rel_path
-    if _excluded_path(rel_path, harness):
+    excluded_rel = rel_path
+    if harness == "codex" and rel_path.startswith("skills/"):
+        agents_root = home / ".agents"
+        if output_root != home / ".codex":
+            agents_root = output_root.parent / "agents"
+        target = agents_root / rel_path
+        excluded_rel = f".agents/{rel_path}"
+    if _excluded_path(excluded_rel, harness):
         return  # Never write to excluded paths
     if target.exists():
         if target.is_symlink():
@@ -1402,6 +1444,11 @@ def _managed_skills_registry_path(home: Path) -> Path:
     return home / ".dotpanel" / "managed-skills.json"
 
 
+def _actual_skills_dir(paths: DotpanelPaths, harness: str) -> Path | None:
+    """Harness-native skills directory for generated user-facing wrappers."""
+    return paths.skills_root(harness, None)
+
+
 def _write_managed_skills_registry(home: Path, names: list[str], harnesses: list[str],
                                    *, dry_run: bool) -> None:
     """Atomically write the managed-skills registry.
@@ -1451,7 +1498,9 @@ def _prune_orphan_skills(paths: DotpanelPaths,
             home = paths.output_root(harness, None)
         except ValueError:
             continue
-        skills_dir = home / "skills"
+        skills_dir = _actual_skills_dir(paths, harness)
+        if skills_dir is None:
+            continue
         if not skills_dir.is_dir():
             continue
         valid_for_harness = _managed_skill_names_for_harness(paths, harness)
@@ -1655,12 +1704,15 @@ def cmd_audit(paths: DotpanelPaths) -> int:
             p = home_dir / known
             if p.exists():
                 candidate_paths.append(p)
-        skills_dir = home_dir / "skills"
-        if skills_dir.is_dir():
+        skills_dir = _actual_skills_dir(paths, harness)
+        if skills_dir is not None and skills_dir.is_dir():
             for skill_md in skills_dir.glob("*/SKILL.md"):
                 candidate_paths.append(skill_md)
         for p in candidate_paths:
-            rel = str(p.relative_to(home_dir))
+            try:
+                rel = str(p.relative_to(home_dir))
+            except ValueError:
+                rel = str(p.relative_to(paths.home))
             if _excluded_path(rel, harness):
                 continue
             if _is_json(p.name):
@@ -1767,28 +1819,34 @@ def cmd_uninstall(paths: DotpanelPaths, harness: str, include_settings: bool,
     actions: list[str] = []
     for target in targets:
         home = paths.output_root(target, None)
-        if not home.exists():
-            continue
         # Find banner-marked files to remove
-        for fp in home.rglob("*"):
-            if not fp.is_file():
-                continue
-            rel = str(fp.relative_to(home))
-            if _excluded_path(rel, target):
-                continue
-            if _is_json(fp.name):
-                if include_settings and is_managed_json(fp, paths.home):
-                    actions.append(f"REMOVE-JSON {fp}")
+        search_roots = [home] if home.exists() else []
+        skills_root = _actual_skills_dir(paths, target)
+        if skills_root is not None and skills_root.exists() and skills_root not in search_roots:
+            search_roots.append(skills_root)
+        for root in search_roots:
+            for fp in root.rglob("*"):
+                if not fp.is_file():
+                    continue
+                try:
+                    rel = str(fp.relative_to(home))
+                except ValueError:
+                    rel = str(fp.relative_to(paths.home))
+                if _excluded_path(rel, target):
+                    continue
+                if _is_json(fp.name):
+                    if include_settings and is_managed_json(fp, paths.home):
+                        actions.append(f"REMOVE-JSON {fp}")
+                        if not dry_run:
+                            fp.unlink()
+                    continue
+                if has_dotpanel_banner(fp):
+                    actions.append(f"REMOVE {fp}")
                     if not dry_run:
                         fp.unlink()
-                continue
-            if has_dotpanel_banner(fp):
-                actions.append(f"REMOVE {fp}")
-                if not dry_run:
-                    fp.unlink()
         # Remove empty skill subdirs
-        skills = home / "skills"
-        if skills.is_dir():
+        skills = _actual_skills_dir(paths, target)
+        if skills is not None and skills.is_dir():
             for d in sorted(skills.glob("*"), reverse=True):
                 if d.is_dir() and not any(d.iterdir()):
                     actions.append(f"RMDIR {d}")
@@ -1842,7 +1900,8 @@ def build_parser() -> argparse.ArgumentParser:
     cfg.add_argument("--force", action="store_true", help="overwrite non-banner files (cutover)")
     cfg.add_argument("--dry-run", action="store_true", help="print intended actions, write nothing")
     cfg.add_argument("--output-dir", type=Path, default=None,
-                     help="render to sandbox path instead of ~/.claude / ~/.codex / ~/.kimi")
+                     help=("render to sandbox path instead of ~/.claude / ~/.codex / "
+                           "~/.kimi and ~/.agents/skills"))
     # D5: PATH injection knobs.
     cfg.add_argument(
         "--include-substrate-bin", dest="include_substrate_bin",
@@ -1866,7 +1925,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cfg.add_argument(
         "--prune-orphan-skills", action="store_true",
-        help="remove banner-marked skill dirs in ~/.claude/skills/ etc. "
+        help="remove banner-marked skill dirs in ~/.claude/skills/ and ~/.agents/skills/ "
         "whose name is not in the current managed-skills registry (C12)",
     )
 

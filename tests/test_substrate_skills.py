@@ -209,6 +209,19 @@ class GatherOutputsSubstrateOverrideTests(unittest.TestCase):
         # curriculum-bridge declares [claude, codex, kimi] so it appears here.
         self.assertIn("skills/curriculum-bridge/SKILL.md", rels)
 
+    def test_codex_configure_writes_skills_to_agents_home(self) -> None:
+        paths = cli_mod.DotpanelPaths(root=cli_mod.dotpanel_root(), home=self.root / "home")
+        output = self.root / "render"
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = cli_mod.cmd_configure(paths, "codex", False, False, False, output)
+        self.assertEqual(rc, 0)
+        self.assertTrue(
+            (output / "agents" / "skills" / "curriculum-bridge" / "SKILL.md").exists()
+        )
+        self.assertFalse(
+            (output / "codex" / "skills" / "curriculum-bridge" / "SKILL.md").exists()
+        )
+
     def test_disabled_list_blacklists_substrate_skill(self) -> None:
         toml = self.substrate / ".dotpanel.toml"
         toml.write_text(

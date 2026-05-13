@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# codx -- codex launcher (bundled with dotpanel; thin shell over kernel secrets)
-# Usage: codx [--<variant> | --variant NAME] [-- codex args...]
+# codx -- codex launcher (env-keyed; reads OPENAI/<provider>_*_KEY from env)
+# Usage: codx [--andy | --let | --variant NAME] [-- codex args...]
 #
-# `<variant>` is any name declared under `.dotpanel.toml [backends.codex.variants]`.
+# Variants map to codex providers defined in ~/.codex/config.toml. Keys are
+# loaded into env by shell startup / VSCode server-env-setup via
+# `dotpanel secrets export --scope llm`, so no `secrets run` wrapper is needed.
 # Use `--` to separate wrapper flags from codex flags when codex flags collide.
 set -euo pipefail
+
+# Alias → codex provider name (matches ~/.codex/config.toml [model_providers.*]).
+declare -A PROVIDER_ALIAS=(
+    [andy]=andyfeng
+    [let]=letaicode
+)
 
 VARIANT=""
 while [[ $# -gt 0 ]]; do
@@ -12,15 +20,16 @@ while [[ $# -gt 0 ]]; do
         --variant)
             VARIANT="${2:?--variant requires NAME}"; shift 2 ;;
         help|--help|-h)
-            sed -n '2,6s/^# \{0,1\}//p' "$0"; exit 0 ;;
+            sed -n '2,8s/^# \{0,1\}//p' "$0"; exit 0 ;;
         --) shift; break ;;
         --*)
-            # Any --<name> before `--` is treated as a variant. Use `--` to
-            # pass codex flags explicitly (e.g. `codx --andy -- login`).
             VARIANT="${1#--}"; shift ;;
         *)  break ;;
     esac
 done
 
-VARIANT="${VARIANT:-andy}"
-exec dotpanel secrets run --backend codex --variant "$VARIANT" -- codex "$@"
+if [[ -n "$VARIANT" ]]; then
+    PROVIDER="${PROVIDER_ALIAS[$VARIANT]:-$VARIANT}"
+    exec codex -c "model_provider=\"$PROVIDER\"" "$@"
+fi
+exec codex "$@"

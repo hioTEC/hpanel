@@ -83,9 +83,12 @@ Configure never writes:
 
 ```text
 ~/.claude/{sessions,history.jsonl,projects,debug,cache,backups,file-history,ide,paste-cache,plugins,session-env,shell-snapshots,tasks,.credentials.json,.git,.gitignore}
-~/.codex/{sessions,history.jsonl,*.sqlite,log,archived_sessions,shell_snapshots,vendor_imports,scheduled_tasks.lock,plugins,rules,memories,skills/.system,installation_id,version.json,.personality_migration,.tmp,tmp}
+~/.codex/{sessions,history.jsonl,*.sqlite,log,archived_sessions,shell_snapshots,vendor_imports,scheduled_tasks.lock,plugins,rules,memories,skills,installation_id,version.json,.personality_migration,.tmp,tmp}
 ~/.kimi/{sessions,logs,credentials,user-history,bin,config.toml,device_id,kimi.json,latest_version.txt}
 ```
+
+Codex user-facing skill wrappers render to `~/.agents/skills/{name}/SKILL.md`
+instead of `~/.codex/skills`, matching the official Codex user skill home.
 
 A substrate-side `dot pull` (or any other sync wrapper) may invoke configure,
 but `dotpanel` does not depend on the wrapper.

@@ -79,7 +79,7 @@ dotpanel configure --harness all
 dotpanel doctor && dotpanel audit
 ```
 
-After step 4, `claude` / `codex` / `kimi` auto-load the generated wrappers which reference your persona + the universal protocol. For day-to-day updates across machines, run `dotpanel sync pull` — it pulls configured repos, reinstalls dotpanel if its source changed, and re-runs `configure --harness all`.
+After step 4, `claude` / `codex` / `kimi` auto-load the generated wrappers which reference your persona + the universal protocol. Codex user skills render to `~/.agents/skills/`, while Codex config and runtime stay in `~/.codex/`. For day-to-day updates across machines, run `dotpanel sync pull` — it pulls configured repos, reinstalls dotpanel if its source changed, and re-runs `configure --harness all`.
 
 ## CLI
 

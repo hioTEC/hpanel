@@ -48,19 +48,17 @@ home-level machine and directory conventions only.
 
 ### Official Discovery Calibration
 
-As of 2026-05-03:
+As of 2026-05-13:
 
 - Claude Code: personal skills live at `~/.claude/skills/{name}/SKILL.md`.
   The skill name is directly user-invocable as `/name`. `.claude/commands/*.md`
   remains a legacy-compatible surface, but new workspace adapters must use
   skills because custom commands have been merged into skills.
 - Codex: skills are invoked explicitly through `/skills` or `$name`, and may be
-  invoked implicitly when the request matches the skill description. Official
-  Codex docs name `$HOME/.agents/skills` as the user skill location, while the
-  current local Codex 0.128 prompt input still exposes wrappers from
-  `$CODEX_HOME/skills`. Treat `~/.codex/skills/{name}/SKILL.md` as the current
-  live Codex adapter until a deliberate hard-cut migration moves the canonical
-  bodies to Codex-native `SKILL.md` directories.
+  invoked implicitly when the request matches the skill description. User-level
+  Codex skills live at `$HOME/.agents/skills/{name}/SKILL.md`; repo-level
+  project skills live at `.agents/skills/{name}/SKILL.md`. `~/.codex/` remains
+  the Codex config/runtime home, not the user skill home.
 - Kimi CLI: the current local setup reads `~/.kimi/AGENTS.md` for startup
   context and discovers shared user-facing skills through Claude's
   `~/.claude/skills/{name}/SKILL.md` surface. Until Kimi exposes a separate
@@ -74,7 +72,7 @@ As of 2026-05-03:
 User-facing skill entries need harness-native wrappers:
 
 - Claude: `~/.claude/skills/{name}/SKILL.md`, invocable as `/name`.
-- Codex: `~/.codex/skills/{name}/SKILL.md`, invocable as `$name` or through
+- Codex: `~/.agents/skills/{name}/SKILL.md`, invocable as `$name` or through
   `/skills`.
 - Kimi: no dotpanel-rendered skill wrappers until a verified Kimi-native user
   skill directory exists.

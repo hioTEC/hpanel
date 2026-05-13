@@ -143,7 +143,7 @@ your `voice.md` identity.
 PROTOCOL (universal methodology, public)
     ~/src/dotpanel/protocol/workspace.md     working style, stop rules, principles
     ~/src/dotpanel/protocol/rules/           engineering / interaction / collaboration rules
-    ~/src/dotpanel/protocol/skills/          reusable procedures (plan / review / ship / wrap / dot / tool)
+    ~/src/dotpanel/protocol/skills/          reusable procedures (plan / review / ship / wrap / sync / tool)
     ~/src/dotpanel/protocol/reference/       cross-project knowledge
 
 PERSONA (operator data, private — yours, on your machine)
@@ -176,9 +176,9 @@ PROJECT (per project, travels with the code)
 └── reference/                          ← optional
 ```
 
-Generated harness homes (`~/.claude/`, `~/.codex/`, `~/.kimi/`) are
-**rendered output**, not source. They're reproducible from dotpanel + persona
-at any time.
+Generated harness homes (`~/.claude/`, `~/.codex/`, `~/.kimi/`) and Codex's
+user skill surface (`~/.agents/skills/`) are **rendered output**, not source.
+They're reproducible from dotpanel + persona at any time.
 
 ### File Classes
 
@@ -234,7 +234,7 @@ lives in ADRs / specs / rules / `CONTEXT.md`.
 | `/review` | Dual-model code or design review | Before commit/merge |
 | `/ship` | Delivery pipeline (review → test → commit → push → verify) | Review passed |
 | `/wrap` | Session close, write durable handoff state | State changed and you're stopping |
-| `/dot` | Config sync (push/pull dotfiles + dotpanel) | Configuration changes |
+| `/sync` | Config sync (push/pull dotfiles + dotpanel) | Configuration changes |
 | `/tool` | Tool lifecycle (try / archive / drop) | Trying or retiring a tool |
 | `/curriculum-bridge` | Curriculum comparison / bridging | Course-mapping work |
 | `/teamleader` | Multi-stream orchestration with background teammates | Wide parallel work |

@@ -5,8 +5,8 @@ type: skill
 parameters:
   - run_id: string
   - agenda: string
-  - max_rounds: number        # default 5
-  - roles: string[]          # default [architect, critic]
+  - max_rounds: number
+  - roles: string[]
 supported_harnesses: [kimi, claude]
 ---
 
@@ -23,11 +23,12 @@ not own the design lifecycle.
 
 1. **Agent Spawn**
    - For each role in `roles`:
-     - Spawn a background sub-agent with `agent_id: {run_id}-{role}-{round}`
+     - Spawn a background sub-agent with a stable identifier scoped to `{run_id}-{role}-{round}`
      - Prompt = identity + role description (e.g., architect, critic, domain expert) + agenda + relevant memory
+   - For harness-specific spawn syntax (e.g., `Agent()` vs `Shell()`), see `harness/{harness}/skills/plan-impl.md`.
 
 2. **Discussion Loop**
-   - Poll `TaskOutput` for each agent
+   - Poll each spawned agent for completion
    - Track turn count in conversation context (session metric, not track system)
    - Before starting a new round, call `skills/session-guardrails.md` (turn threshold check)
    - When all agents have returned:
@@ -35,8 +36,7 @@ not own the design lifecycle.
      - If unanimous consensus → proceed to Convergence
      - If disagreement:
        - Increment `round`
-       - If any agent has been resumed `>= 3` times → **Yellow checkpoint**: warn about agent fatigue
-       - If any agent has been resumed `>= 5` times → **Red checkpoint**: recommend killing and respawning the agent
+       - If any agent has been resumed beyond the resume threshold → checkpoint: warn about agent fatigue
        - Resume each agent with the summary + new focused question
       - If `round >= max_rounds` → pause, mark `blocked_human` in the active run `handoff.md` and record the split decision
 
@@ -61,11 +61,11 @@ not own the design lifecycle.
 
    **5.2 Internal Critic (Sub-agent, same harness)**
 
-   Launch the in-harness critic per `{{DOTPANEL_ROOT}}/protocol/skills/code-review.md` section "Resolver" (context = design artifact only; do not pass workspace/memory/history). The critic and the external reviewer in 5.3 must be launched in parallel.
+   Launch the in-harness critic per `skills/code-review.md` section "Resolver". The critic and the external reviewer in 5.3 must be launched in parallel. For harness-specific spawn syntax, see `harness/{harness}/skills/plan-impl.md`.
 
-   **5.3 External Reviewer (different harness, either codex or kimi-cli)**
+   **5.3 External Reviewer (Different harness)**
 
-   Select the reviewer per `{{DOTPANEL_ROOT}}/protocol/skills/code-review.md` section 2 "Select External Reviewer"; compose the review brief and launch per sections 3-4, scope = "design". For design reviews, prefer kimi-cli (prompt-native). The reviewer must not receive the orchestrator's hidden scenarios.
+   Select the reviewer per `skills/code-review.md` section 2 "Select External Reviewer"; compose the review brief and launch per sections 3-4, scope = "design". The reviewer must not receive the orchestrator's hidden scenarios. For harness-specific invocation commands, see `harness/{harness}/skills/plan-impl.md`.
 
    **5.4 Cross-Reference and Adjudication**
    - Once both reviewers return, the orchestrator performs a four-way comparison:
@@ -73,7 +73,7 @@ not own the design lifecycle.
      b) **Issues found by the external reviewer** -- scenarios and gaps independently identified by the cross-harness reviewer
      c) **Orchestrator's hidden scenarios** -- extreme scenarios devised during the self-check
      d) **Current design artifact coverage** -- are all of the above three adequately covered by the existing design?
-   - Synthesis rules follow `{{DOTPANEL_ROOT}}/protocol/skills/code-review.md` section 5 "Synthesize". Specific to this step:
+   - Synthesis rules follow `skills/code-review.md` section 5 "Synthesize". Specific to this step:
      - If either the internal or external reviewer found a blind spot the orchestrator did not anticipate (compared against hidden scenarios) -> **must roll back**: record the new issue in the active run `handoff.md`, return to Step 3 (Discussion Loop) or Step 4 (Convergence) to revise the design artifact, then re-enter Stealth Challenge.
      - If the reviewers' findings are already covered by the design artifact but the explanation is insufficiently clear or explicit -> update the relevant sections of the design artifact to strengthen the reasoning, then re-enter Stealth Challenge.
      - If all scenarios (hidden + internal + external) are adequately covered by the design artifact with sufficient reasoning -> proceed to Step 5 (Decision Registry).

@@ -1760,12 +1760,83 @@ def cmd_audit(paths: DotpanelPaths) -> int:
             "Run `dotpanel audit --dist` for full member inspection."
         )
 
+    # 5. Skill layer consistency
+    def _read_frontmatter_extends(path: Path) -> str | None:
+        """Parse 'extends: protocol:<name>' from YAML frontmatter."""
+        try:
+            text = path.read_text(encoding="utf-8")
+            if not text.startswith("---"):
+                return None
+            end = text.find("\n---", 3)
+            if end == -1:
+                return None
+            fm = text[3:end]
+            m = re.search(r"^extends:\s*protocol:([\w-]+)$", fm, re.MULTILINE)
+            if m:
+                return m.group(1)
+        except Exception:
+            pass
+        return None
+
+    protocol_skills_dir = paths.protocol / "skills"
+    protocol_sections: dict[str, set[str]] = {}
+    if protocol_skills_dir.is_dir():
+        for proto_skill in protocol_skills_dir.glob("*.md"):
+            proto_name = proto_skill.stem
+            protocol_sections[proto_name] = _extract_markdown_sections(proto_skill)
+
+    # Check harness overrides
+    for harness_name in ("claude", "kimi"):
+        harness_dir = paths.harness / harness_name / "skills"
+        if harness_dir.is_dir():
+            for skill_file in harness_dir.glob("*.md"):
+                proto_name = _read_frontmatter_extends(skill_file)
+                if proto_name and proto_name in protocol_sections:
+                    override_sections = _extract_markdown_sections(skill_file)
+                    for sect in override_sections:
+                        if sect.startswith("additional:"):
+                            continue
+                        if sect not in protocol_sections[proto_name]:
+                            print(
+                                f"WARN  harness/{harness_name}/skills/{skill_file.name}: "
+                                f"section '{sect}' not in protocol/{proto_name}.md"
+                            )
+
+    # Check persona defaults
+    persona_dir = paths.home / ".dotfiles" / "skills"
+    if persona_dir.is_dir():
+        for skill_file in persona_dir.glob("*-defaults.md"):
+            proto_name = _read_frontmatter_extends(skill_file)
+            if proto_name and proto_name in protocol_sections:
+                default_sections = _extract_markdown_sections(skill_file)
+                for sect in default_sections:
+                    if sect.startswith("additional:"):
+                        continue
+                    if sect not in protocol_sections[proto_name]:
+                        print(
+                            f"WARN  persona/skills/{skill_file.name}: "
+                            f"section '{sect}' not in protocol/{proto_name}.md"
+                        )
+
     if issues:
         for issue in issues:
             print(f"FAIL  {issue}")
         return 2
     print("OK  dotpanel audit passed")
     return 0
+
+
+def _extract_markdown_sections(path: Path) -> set[str]:
+    """Extract ## and ### section titles from a markdown file."""
+    sections: set[str] = set()
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"^#{2,3}\s+(.+)$", line)
+            if m:
+                sections.add(m.group(1).strip())
+    except Exception:
+        pass
+    return sections
 
 
 def _archive_members(archive: Path) -> Iterable[str]:

@@ -9,7 +9,7 @@ parameters:
   - worktree: string
   - scope: string[]
   - verification_seq: string[]
-  - max_retries: number      # default 3
+  - max_retries: number
 supported_harnesses: [kimi, claude]
 ---
 
@@ -53,8 +53,8 @@ code → review → ui_review → verify → ship → wrap
    - Enter code node; retry_count starts at 0, tracked in conversation context
    - Primary agent reads `handoff.md` + run manifest + named ADR/spec/design docs + project `AGENTS.md` to build full context (leveraging prompt cache)
    - Split scope into independent tasks and estimate effort for each
-   - **Primary agent handles directly (default path):** tasks with < 100 lines changed. Primary agent context is cached, so marginal cost is lower than delegation.
-   - **Delegated (parallel acceleration path):** independent tasks with > 100 lines changed. Dispatch via `delegate-spec.md` scheduling decision tree.
+   - **Primary agent handles directly (default path):** tasks below the delegation threshold (per `skills/delegate-spec.md` §Decision Framework). Primary agent context is cached, so marginal cost is lower than delegation.
+   - **Delegated (parallel acceleration path):** independent tasks above the delegation threshold. Dispatch via `delegate-spec.md` scheduling decision tree.
    - **Hybrid mode (optimal):** dispatch large tasks to background while handling small tasks in parallel.
    - Once all changes are complete, run `verification_seq` deterministically (tsc, eslint, vitest, etc.)
    - If fail → investigate first (call `skills/investigate.md`)
@@ -64,7 +64,7 @@ code → review → ui_review → verify → ship → wrap
    - Determine external reviewer per the cross-harness rules in `skills/code-review.md` (different harness family from primary agent)
    - **Launch two reviewers in parallel:**
      - **Internal reviewer (sub-agent, same harness):** spawn reviewer-agent with diff + scope context + handoff-named design artifacts
-     - **External reviewer (codex or kimi-cli, different harness):** compose a neutral review brief (format per `skills/code-review.md` §3) and launch in parallel
+     - **External reviewer (different harness family):** compose a neutral review brief (format per `skills/code-review.md` §3) and launch in parallel
    - Wait for both to return
    - **Synthesize both results** (rules per `skills/code-review.md` §5):
      - Either says REQUEST_CHANGES with concrete blocker → REQUEST_CHANGES
@@ -85,7 +85,7 @@ code → review → ui_review → verify → ship → wrap
    - If no UI files → skip to `verify`
 
 5. **Node: verify** (independent sub-agent)
-   - Spawn a **fresh** sub-agent (NOT the coder or reviewer) with `run_in_background: true`
+   - Spawn a **fresh** sub-agent (NOT the coder or reviewer) in the background
    - Sub-agent receives: run handoff + accepted ADR/spec/design docs named by the handoff + project `AGENTS.md` + codebase access
    - Sub-agent does NOT receive: SUMMARY, commit messages, or any implementer self-report
    - **Goal-backward verification:** per `{{DOTPANEL_ROOT}}/protocol/workspace.md` §"Verification: Goal-Backward", run the 4-level artifact check.

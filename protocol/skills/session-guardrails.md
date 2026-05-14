@@ -13,80 +13,64 @@ supported_harnesses: [kimi, claude]
 ## Purpose
 Prevent context fatigue by inserting hard stops when session metrics cross danger thresholds.
 
-## Thresholds & Actions
+## Threshold Types
+
+Guardrails monitor the following metric types. Each type has Yellow / Red / Black levels with escalating actions. Specific threshold values and checkpoint prompt formats are defined in the operator's persona or project `.agents/skills/` override.
 
 ### 1. Turn Threshold
 
 **Metric:** Total parent + sub-agent turns in current session.
 
-| Level | Threshold | Action |
-|-------|-----------|--------|
-| Yellow | 30 turns | Output a 1-paragraph status digest to the user (no pause required) |
-| Red | 50 turns | **Force pause**. Present a 5-sentence checkpoint. Wait for human A/B/C/D selection. |
-| Black | 100 turns | **Recommend landing or reset**. Unless human explicitly overrides, write escalate handoff. |
-
-<!-- User-facing checkpoint prompt — Chinese per voice.md interaction rule -->
-**Red checkpoint prompt template:**
-```markdown
-**强制 Checkpoint — 已运行 {N} turns**
-
-1. 原始目标: {active run outcome / scope summary}
-2. 最后 atomic commit: {commit hash + message}
-3. 当前正在改: {file + problem}
-4. 阻塞点: {blocker}
-5. 范围偏离: {none / slight / significant}
-
-请选择:
-[A] 继续，方向正确
-[B] 我要看 diff 再决定
-[C] 回退到 commit {hash} 重新从干净状态开始
-[D] 这已超出原 scope，拆成新 active run
-```
+| Level | Action |
+|-------|--------|
+| Yellow | Output a 1-paragraph status digest to the user (no pause required) |
+| Red | **Force pause**. Present a checkpoint. Wait for human A/B/C/D selection. |
+| Black | **Recommend landing or reset**. Unless human explicitly overrides, write escalate handoff. |
 
 ### 2. Sub-Agent Resume Threshold
 
 **Metric:** How many times a single `agent_id` has been resumed for the same node.
 
-| Level | Threshold | Action |
-|-------|-----------|--------|
-| Yellow | 3 resumes | Warn in status output: "{role} has been resumed 3 times; watch for circular fixes." |
-| Red | 5 resumes | **Force pause**. Recommend killing the agent and spawning a fresh instance with a compressed prompt. |
-| Black | 8 resumes | **Auto-kill the agent_id**. Replace with fresh instance. If parent cannot explain the root cause, escalate to human. |
+| Level | Action |
+|-------|--------|
+| Yellow | Warn in status output: watch for circular fixes. |
+| Red | **Force pause**. Recommend killing the agent and spawning a fresh instance with a compressed prompt. |
+| Black | **Auto-kill the agent_id**. Replace with fresh instance. If parent cannot explain the root cause, escalate to human. |
 
 ### 3. Handoff Bloat Threshold
 
 **Metric:** Word count of `handoff.md`.
 
-| Level | Threshold | Action |
-|-------|-----------|--------|
-| Yellow | 300 words | Suggest summarization at next wrap. |
-| Red | 500 words | **Force compress** before any new sub-agent is spawned. Move historical rationale to `{project}/.agents/journal/diaries/YYYY-MM-DD-{run}.md` (project-scoped) or the operator's central-node `.agents/journal/diaries/YYYY-MM-DD-{topic}.md` (cross-project). |
+| Level | Action |
+|-------|--------|
+| Yellow | Suggest summarization at next wrap. |
+| Red | **Force compress** before any new sub-agent is spawned. Move historical rationale to project or central-node journal. |
 
 ### 4. Scope Drift Threshold
 
 **Metric:** Files modified outside active run declared scope.
 
-| Level | Threshold | Action |
-|-------|-----------|--------|
-| Yellow | 1 file outside scope | Warn and list the file. Ask user if it should be included. |
-| Red | 3 files outside scope | **Force pause**. Present drift analysis and options: include in scope (update run manifest) / revert those changes / split new active run. |
+| Level | Action |
+|-------|--------|
+| Yellow | Warn and list the file. Ask user if it should be included. |
+| Red | **Force pause**. Present drift analysis and options: include in scope (update run manifest) / revert those changes / split new active run. |
 
 ### 5. Investigate Ping-Pong Threshold
 
 **Metric:** Failed root-cause hypotheses in `skills/investigate.md`.
 
-| Level | Threshold | Action |
-|-------|-----------|--------|
-| Red | 3 failed hypotheses | **Auto-escalate to human** with the list of disproven hypotheses. Do not allow a 4th guess. |
+| Level | Action |
+|-------|--------|
+| Red | **Auto-escalate to human** with the list of disproven hypotheses. Do not allow a 4th guess. |
 
 ### 6. Infra Leak Threshold
 
 **Metric:** Consecutive turns spent on proxy, env vars, package versions, or build tools inside a code run.
 
-| Level | Threshold | Action |
-|-------|-----------|--------|
-| Yellow | 10 turns | Warn: "This appears to be an infrastructure issue inside a code run. Consider splitting an infra run." |
-| Red | 20 turns | **Force pause**. Options: A) Move infra fix to a new run B) Hand-fix outside this session C) Provide one final attempt with explicit rollback plan. |
+| Level | Action |
+|-------|--------|
+| Yellow | Warn: "This appears to be an infrastructure issue inside a code run. Consider splitting an infra run." |
+| Red | **Force pause**. Options: A) Move infra fix to a new run B) Hand-fix outside this session C) Provide one final attempt with explicit rollback plan. |
 
 ### 7. Run Lifecycle Checkpoint
 

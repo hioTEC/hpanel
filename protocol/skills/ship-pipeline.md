@@ -1,10 +1,10 @@
 ---
 name: ship-pipeline
-description: Single delivery entry point after Plan — ADR commit → implementation → dual cross-harness codex pass → direct push to main → deploy / smoke → summary. Hands off close-out work to /wrap.
+description: Single delivery entry point after Plan — ADR commit → implementation → dual cross-harness review pass → direct push to main → deploy / smoke → summary. Hands off close-out work to /wrap.
 type: skill
 parameters:
-  - branch: string                       # defaults to main
-  - risk_level: low | medium | high      # affects codex pass strictness, defaults to medium
+  - branch: string
+  - risk_level: low | medium | high
 supported_harnesses: [kimi, claude]
 ---
 
@@ -28,19 +28,12 @@ After `/plan` has finalized the approach and obtained user sign-off, this is the
 
 ## Hard Constraints
 
-- **2 codex passes are mandatory**: 1 ADR review + 1 implementation review. Both are required without exception.
+- **2 cross-harness review passes are mandatory**: 1 ADR review + 1 implementation review. Both are required without exception.
 - **Directional issues flag → STOP, report to user**; do not paper over them with follow-up commits.
   - Directional = decision misalignment / scope misalignment / scenario anchor misalignment / cross-layer boundary violation
   - Non-directional = style / typo / local boundary / naming / test coverage
 - **Default is direct push to main**; feature branch requires an explicit `branch:` parameter. Inherits git-conventions project-level rules.
 - **Pre-stage check + explicit `git add <files>`** (inherits `~/.dotfiles` leak-check + workspace.md §4).
-
-## Soft Defaults
-
-- **3-commit cadence**: commit-1 ADR / commit-2 implementation / commit-3 revision.
-- Commit count scales with scope (small tasks: 2, complex tasks: 4+); as long as both codex passes have run, this is acceptable.
-- ADR prefix defaults to the plan's decision level (`ADR-comp-` / `ADR-arch-` / `ADR-design-`, see project AGENTS.md).
-- `risk_level: high` → ADR pass criteria escalate from "no directional flags" to "explicit codex APPROVE"; implementation pass must use `code-review.md` adversarial brief mode.
 
 ## Process
 
@@ -56,16 +49,16 @@ The form of Plan-phase output determines the ADR source:
 
 | Plan Output | Commit-1 Action |
 |---|---|
-| Plan already wrote an ADR draft (status: `proposed`) | Finalize + add codex pass trace + promote to `accepted` per the §`accepted` checklist |
+| Plan already wrote an ADR draft (status: `proposed`) | Finalize + add external review pass trace + promote to `accepted` per the §`accepted` checklist |
 | Plan only produced a design note / decision registry | Agent drafts a formal ADR (per project ADR template + prefix rules) |
 | Decision is small enough to not need a standalone ADR (per template "When to write an ADR") | Skip commit-1; only reference the plan note in commit-2 message body |
 
 **Frontmatter (post-plan scenario)**:
 
 ```yaml
-status: proposed                         # change to accepted after codex pass-1 completes
+status: proposed                         # change to accepted after external review pass-1 completes
 reviewers:
-  - codex (pending)
+  - external (pending)
   - user (signed-off YYYY-MM-DD via /plan — see {plan-note-ref})
 decision-makers: [user via /plan]
 ```
@@ -74,14 +67,14 @@ decision-makers: [user via /plan]
 - Commit message: `docs: ADR-{prefix}-{NNN} {one-line decision}`
 - Hook failure → fix root cause + new commit. **Do not** use `--no-verify`, **do not** use `--amend`.
 
-### 3. Codex Pass #1 — ADR Review
+### 3. External Review Pass #1 — ADR Review
 
-- Invoke `skills/code-review.md` codex external review, scope = `design`
+- Invoke `skills/code-review.md` external cross-harness review, scope = `design`
 - Input: ADR + plan note + referenced design docs
-- **Pass criteria (default medium)**: readable + consistent + no obvious gaps (does not require explicit codex `APPROVE`, requires "no directional flags")
-- **Pass criteria (`risk_level: high`)**: explicit codex `APPROVE`
-- Update ADR frontmatter `reviewers: codex (1 pass; {brief note})`, promote to `accepted` (per ADR template `accepted` checklist)
-- If codex flags a **directional issue** → STOP, report to user: "Codex found directional issue X in the ADR — do we need to revisit /plan?"
+- **Pass criteria (default medium)**: readable + consistent + no obvious gaps (does not require explicit external `APPROVE`, requires "no directional flags")
+- **Pass criteria (`risk_level: high`)**: explicit external `APPROVE`
+- Update ADR frontmatter `reviewers: external (1 pass; {brief note})`, promote to `accepted` (per ADR template `accepted` checklist)
+- If external review flags a **directional issue** → STOP, report to user: "External review found directional issue X in the ADR — do we need to revisit /plan?"
 - Otherwise → proceed to implementation
 
 ### 4. Commit-2 — Implementation
@@ -92,9 +85,9 @@ decision-makers: [user via /plan]
 - **Implementation reveals an ADR gap (decision gap, not a detail)** → STOP, report to user
 - Implementation complete → run full verification + UI changes → screenshot/dev-server validation (per project AGENTS.md frontend rules)
 
-### 5. Codex Pass #2 — Implementation Review
+### 5. External Review Pass #2 — Implementation Review
 
-- Invoke `skills/code-review.md` full cross-harness review (sub-agent same harness + codex external different harness in parallel)
+- Invoke `skills/code-review.md` full cross-harness review (sub-agent same harness + external reviewer on different harness in parallel)
 - Input: full diff (`git diff {base}...HEAD`) + ADR + referenced design docs
 - `risk_level: high` → mandatory adversarial brief mode
 - **Directional flags**:
@@ -138,7 +131,7 @@ decision-makers: [user via /plan]
 ```markdown
 ## /ship Summary
 
-### What Codex flagged in review
+### What external review flagged
 - ADR pass-1: {key point 1, key point 2 ...}
 - Impl pass-2: {key point 1, key point 2 ...}
 
@@ -170,11 +163,11 @@ Wrap reads the `Deployed:` line at the end of `handoff.md` as evidence that ship
 | Phase | Failure | Action |
 |------|------|------|
 | Pre-flight baseline | typecheck / test / build fails | STOP → `skills/investigate.md` |
-| Codex Pass #1 (ADR) | directional flag | STOP, report to user |
+| External Review Pass #1 (ADR) | directional flag | STOP, report to user |
 | Implementation | ADR gap found (decision gap, not a detail) | STOP, report to user |
 | Implementation | verification fails 3 times | `skills/investigate.md` |
-| Codex Pass #2 (Impl) | directional flag (scope/decision misalignment) | STOP, report to user |
-| Codex Pass #2 (Impl) | non-directional flag (concerns/local) | proceed to revision |
+| External Review Pass #2 (Impl) | directional flag (scope/decision misalignment) | STOP, report to user |
+| External Review Pass #2 (Impl) | non-directional flag (concerns/local) | proceed to revision |
 | Push | hook failure | fix root cause + new commit; no `--no-verify` / `--amend` |
 | Deploy | build / runtime failure | investigate; unrecoverable → revert |
 | Deploy | config / secret / DNS failure | fix config + redeploy, do not touch code |
@@ -182,7 +175,7 @@ Wrap reads the `Deployed:` line at the end of `handoff.md` as evidence that ship
 
 ## Notes on relationship to `implement-pipeline.md`
 
-`implement-pipeline.md` is a full multi-node state machine (with active run / verify sub-agent / multi-agent dispatch), suited for long-running multi-session tasks. `/ship` is a simplified path for the post-plan single-session cycle — within one session the agent self-drives ADR + implementation + 2 codex passes + revision + push + deploy + smoke.
+`implement-pipeline.md` is a full multi-node state machine (with active run / verify sub-agent / multi-agent dispatch), suited for long-running multi-session tasks. `/ship` is a simplified path for the post-plan single-session cycle — within one session the agent self-drives ADR + implementation + 2 external review passes + revision + push + deploy + smoke.
 
 | Scenario | Which path |
 |---|---|

@@ -1,6 +1,6 @@
 ---
 name: investigate
-description: Root-cause analysis for failures, regressions, or user-reported bugs. Iron law: no fix without root cause.
+description: Root-cause analysis for failures, regressions, or user-reported bugs.
 type: skill
 parameters:
   - symptom: string
@@ -11,8 +11,9 @@ supported_harnesses: [kimi, claude]
 
 # Investigate
 
-## Iron Law
-**Do not fix until you can state the root cause as a testable claim.**
+## Constraints
+
+See `rules/root-cause-first.md` for the iron law: **do not fix until you can state the root cause as a testable claim.**
 
 ## Phase 1: Gather Symptoms
 

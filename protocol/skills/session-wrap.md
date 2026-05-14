@@ -122,8 +122,8 @@ Routing rule:
 
 | Scope of the lesson | Path |
 |---|---|
-| State changes confined to one project (e.g. "<project> codebase-coherence Phase 2") | `{project}/.agents/journal/diaries/YYYY-MM-DD-{topic}.md` |
-| Cross-project / operator infrastructure / protocol evolution (e.g. "slug layer removed", "claw -p compliance findings") | operator's **central-node repo**'s `.agents/journal/diaries/YYYY-MM-DD-{topic}.md` (the operator designates the central-node repo in their persona; the choice is operator-private) |
+| State changes confined to one project | `{project}/.agents/journal/diaries/YYYY-MM-DD-{topic}.md` |
+| Cross-project / operator infrastructure / protocol evolution | operator's **central-node** journal path (designated in persona) `.agents/journal/diaries/YYYY-MM-DD-{topic}.md` |
 
 Persona itself stores **no journal** — runtime is project-layer. Project-scoped
 diaries belong in the project's own `.agents/journal/`. When unsure, default

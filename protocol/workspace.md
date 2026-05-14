@@ -130,6 +130,16 @@ The main session binds one backend. For independent perspective, use a different
 
 Harness startup files and user-facing skill entries are adapters. Canonical rules and skill bodies live in `{{DOTPANEL_ROOT}}/protocol/`; harness-local surfaces must stay thin and point back to that source of truth.
 
+## Skill Resolution
+
+When executing a skill, read in this order:
+
+1. **Global rendered skill**: `~/.{harness}/skills/{name}/SKILL.md` (compiled from protocol + harness + persona at `configure` time)
+2. **Project override**: `{project}/.agents/skills/{name}.md` — if present, merge by matching section titles; if a section title exists in both, the project version wins
+3. **Persona defaults**: `~/.dotfiles/skills/{name}-defaults.md` — if present and no project override for that section, merge by matching section titles
+
+If a project override covers a section not found in the global skill, warn the user of possible drift (typo or stale reference). Writing skills: general rules go to `protocol/`, harness-specific syntax to `harness/{h}/`, personal thresholds to `persona/`, project conventions to `proj/.agents/`.
+
 ## Summon-On-Demand Context
 
 | Trigger | Read / Run |

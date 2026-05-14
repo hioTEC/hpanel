@@ -451,6 +451,13 @@ def _discover_substrate_skills(substrate_skills_dir: Path | None) -> dict[str, S
     return found
 
 
+def _yaml_quoted_scalar(value: str) -> str:
+    """Return a one-line YAML double-quoted scalar."""
+    compact = " ".join(value.split())
+    escaped = compact.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def skill_wrapper_body(name: str, harness: str, dotpanel_root_str: str,
                        sync_command: str = "dotpanel sync") -> str:
     canonical_rel = f"protocol/skills/{CANONICAL_SKILL_FILES[name]}"
@@ -475,7 +482,8 @@ def skill_wrapper_body(name: str, harness: str, dotpanel_root_str: str,
     fm = (
         "---\n"
         f"name: {name}\n"
-        f"description: |\n  Use when the user invokes {invoke}. {description} {surface}: delegates to {canonical_abs}.\n"
+        "description: "
+        f"{_yaml_quoted_scalar(f'Use when the user invokes {invoke}. {description} {surface}: delegates to {canonical_abs}.')}\n"
         "---\n"
     )
     # The `sync` wrapper bakes the substrate-configured sync command into the
@@ -524,7 +532,8 @@ def substrate_skill_wrapper_body(skill: SubstrateSkill, harness: str) -> str:
     fm = (
         "---\n"
         f"name: {skill.name}\n"
-        f"description: |\n  Use when the user invokes {invoke}. {description} {surface}: delegates to {canonical_abs}.\n"
+        "description: "
+        f"{_yaml_quoted_scalar(f'Use when the user invokes {invoke}. {description} {surface}: delegates to {canonical_abs}.')}\n"
         "---\n"
     )
     return (
@@ -588,7 +597,8 @@ def cmd_doctor(paths: DotpanelPaths,
     if not pyproject.exists():
         issues.append(
             f"pyproject.toml missing at {pyproject}. "
-            "Repo may have been moved without re-running 'pip install -e .'"
+            f"Repo may have been moved without re-running "
+            f"'uv tool install --editable {paths.root}'"
         )
 
     # Editable install pointing at this source location
@@ -600,7 +610,7 @@ def cmd_doctor(paths: DotpanelPaths,
             if installed.resolve() != source.resolve():
                 issues.append(
                     f"dotpanel installed at {installed} but source at {source}. "
-                    f"Re-run 'pip install -e .' from {paths.root}"
+                    f"Re-run 'uv tool install --editable {paths.root}'"
                 )
     except Exception as exc:
         issues.append(f"editable-install detection failed: {exc}")
@@ -780,8 +790,8 @@ def cmd_doctor(paths: DotpanelPaths,
                     f"multiple `dotpanel` source checkouts detected:\n        "
                     + "\n        ".join(sorted(source_dirs))
                     + "\n      Run `pip uninstall dotpanel` until only one "
-                    "editable install remains; then `pip install -e .` from "
-                    "the canonical source dir."
+                    "editable install remains; then `uv tool install --editable "
+                    "<canonical-source-dir>`."
                 )
     except Exception:
         # Best-effort; metadata can fail in odd environments.

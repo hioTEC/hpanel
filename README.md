@@ -4,6 +4,21 @@
 
 Personal Agent Workspace control plane. Public protocol library + Python CLI + harness adapter generator for AI coding agents (Claude Code, Codex, Kimi).
 
+dotpanel solves the "agent setup is scattered across hidden home directories"
+problem. It keeps universal operating rules in a public repo, keeps operator
+persona data outside the public repo, and renders the exact startup files each
+AI harness expects. After setup, a fresh `claude`, `codex`, or `kimi` session
+loads the same protocol plus your persona without hand-editing `~/.claude/`,
+`~/.codex/`, or `~/.kimi/`.
+
+## What You Get
+
+- `~/src/dotpanel/` as the public protocol + CLI source.
+- A persona directory such as `~/.persona/` with `voice.md` and `identity.yaml`.
+- A gitignored `~/src/dotpanel/persona` symlink pointing at that persona.
+- Rendered harness adapters in `~/.claude/`, `~/.codex/`, and `~/.kimi/`.
+- Optional launchers (`claw`, `codx`, `dot`) on PATH via `~/.config/dotpanel/path.sh`.
+
 ## Three-Layer Model
 
 | Layer | Location | Scope |
@@ -59,24 +74,45 @@ Large projects:  /plan → /teamleader → /wrap
 ## Quick Start
 
 ```bash
-# 1. Install (Python >= 3.12)
-pip install -e ~/src/dotpanel
+# 0. Clean Linux/WSL prerequisites
+sudo apt-get update
+sudo apt-get install -y git curl python3 python3-venv python3-pip gh
+gh auth login --web
 
-# 2. Create a persona directory
+# 1. Clone
+mkdir -p ~/src ~/vendor ~/tmp
+git clone https://github.com/hioTEC/dotpanel.git ~/src/dotpanel
+
+# 2. Install (Python >= 3.12)
+# uv avoids PEP 668 system-python restrictions on modern Debian/Ubuntu.
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv tool install --editable ~/src/dotpanel
+
+# 3. Create a persona directory
 mkdir -p ~/.persona
 # Write voice.md and identity.yaml (see docs/onboarding.md)
 
-# 3. Wire the persona symlink
+# 4. Wire the persona symlink
 dotpanel init --persona-root ~/.persona
 
-# 4. Render harness adapters
+# 5. Render harness adapters
 dotpanel configure --harness all
 
-# 5. Open a new shell (or `source ~/.config/dotpanel/path.sh`)
+# 6. Open a new shell (or `source ~/.config/dotpanel/path.sh`)
 #    so `claw` / `codx` / `dot` land on PATH
 
-# 6. Verify
+# 7. Verify
 dotpanel doctor && dotpanel audit
+```
+
+If you cannot use `uv`, use an isolated virtual environment instead of writing
+into the system Python:
+
+```bash
+python3 -m venv ~/.local/share/venvs/dotpanel
+~/.local/share/venvs/dotpanel/bin/pip install -e ~/src/dotpanel
+~/.local/share/venvs/dotpanel/bin/dotpanel --version
 ```
 
 After step 4, `claude` / `codex` / `kimi` auto-load the generated adapters which reference your persona + the universal protocol. Direct `claude`, `codex`, `claw`, and `codx` use the official provider/auth path. Relay backends are explicit: `claw --variant NAME` runs Claude through `dotpanel secrets run --backend claude --variant NAME`, and `codx --variant PROFILE` or shortcuts such as `codx --let` run Codex through `dotpanel secrets run --backend codex --variant PROFILE -- codex -p PROFILE`.

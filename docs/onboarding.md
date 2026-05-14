@@ -25,21 +25,51 @@ not dump the whole document at once.
 Before starting, confirm:
 
 1. A Linux box (incl. WSL) or macOS.
-2. Python ≥ 3.12 and `uv` (or `pip`) installed.
-3. At least one AI harness CLI installed and reachable:
+2. `git`, `curl`, Python ≥ 3.12, and `uv` installed.
+   On a clean Ubuntu/WSL box:
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y git curl python3 python3-venv python3-pip gh
+   gh auth login --web
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   export PATH="$HOME/.local/bin:$PATH"
+   ```
+
+   `uv` is the preferred install path because modern Debian/Ubuntu systems
+   mark system Python as externally managed (PEP 668). If `uv` is unavailable,
+   use a dedicated venv; do not install dotpanel into system Python.
+
+3. Unix-style workspace directories exist:
+
+   ```bash
+   mkdir -p ~/src ~/vendor ~/tmp
+   ```
+
+   Owned repos go under `~/src/`; third-party trials under `~/vendor/`;
+   one-off scripts and reports under `~/tmp/`.
+
+4. At least one AI harness CLI installed and reachable:
    - `claude --version` — Claude Code (`npm i -g @anthropic-ai/claude-code`)
    - `codex --version` — Codex CLI
    - `kimi --version` — Kimi CLI
 
    Pick whichever you'll use; you can add the others later.
 
-4. dotpanel cloned and installed:
+5. dotpanel cloned and installed:
 
    ```bash
    git clone <dotpanel-repo-url> ~/src/dotpanel
    uv tool install --editable ~/src/dotpanel
-   # or: pip install -e ~/src/dotpanel
    dotpanel --version    # confirm install
+   ```
+
+   venv fallback:
+
+   ```bash
+   python3 -m venv ~/.local/share/venvs/dotpanel
+   ~/.local/share/venvs/dotpanel/bin/pip install -e ~/src/dotpanel
+   ~/.local/share/venvs/dotpanel/bin/dotpanel --version
    ```
 
 If anything is missing, fix it before continuing. Once `dotpanel --version`

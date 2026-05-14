@@ -4,6 +4,16 @@
 
 个人 Agent 工作区控制面板。公开的 protocol 库 + Python CLI + harness 适配器生成器，支持 Claude Code、Codex、Kimi。
 
+dotpanel 解决的是 “agent 配置散落在各种 home 隐藏目录里” 的问题。通用方法论放在公开 repo，个人 persona 留在私有目录，CLI 负责把二者渲染成各个 AI harness 需要的启动文件。装好后，新开的 `claude`、`codex`、`kimi` session 会自动加载同一套 protocol 和你的 persona，不需要手改 `~/.claude/`、`~/.codex/`、`~/.kimi/`。
+
+## 装好后会得到什么
+
+- `~/src/dotpanel/`：公开 protocol + CLI 源码。
+- 一个 persona 目录，例如 `~/.persona/`，包含 `voice.md` 和 `identity.yaml`。
+- `~/src/dotpanel/persona` 这个 gitignored symlink，指向你的 persona。
+- 渲染好的 harness adapter：`~/.claude/`、`~/.codex/`、`~/.kimi/`。
+- 可选 launcher（`claw`、`codx`、`dot`），通过 `~/.config/dotpanel/path.sh` 进入 PATH。
+
 ## 三层模型
 
 | 层级 | 位置 | 职责 |
@@ -59,24 +69,44 @@ Persona 内容不在本 repo 中。dotpanel 只负责通用 protocol + 渲染 ha
 ## 快速开始
 
 ```bash
-# 1. 安装（需要 Python >= 3.12）
-pip install -e ~/src/dotpanel
+# 0. 干净 Linux/WSL 前置准备
+sudo apt-get update
+sudo apt-get install -y git curl python3 python3-venv python3-pip gh
+gh auth login --web
 
-# 2. 创建 persona 目录
+# 1. 下载
+mkdir -p ~/src ~/vendor ~/tmp
+git clone https://github.com/hioTEC/dotpanel.git ~/src/dotpanel
+
+# 2. 安装（需要 Python >= 3.12）
+# uv 避开新版 Debian/Ubuntu 的 PEP 668 system-python 限制。
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv tool install --editable ~/src/dotpanel
+
+# 3. 创建 persona 目录
 mkdir -p ~/.persona
 # 编写 voice.md 和 identity.yaml（参见 docs/onboarding.md）
 
-# 3. 建立 persona 符号链接
+# 4. 建立 persona 符号链接
 dotpanel init --persona-root ~/.persona
 
-# 4. 渲染 harness 适配器
+# 5. 渲染 harness 适配器
 dotpanel configure --harness all
 
-# 5. 开一个新 shell（或 `source ~/.config/dotpanel/path.sh`）
+# 6. 开一个新 shell（或 `source ~/.config/dotpanel/path.sh`）
 #    让 `claw` / `codx` / `dot` 进入 PATH
 
-# 6. 验证
+# 7. 验证
 dotpanel doctor && dotpanel audit
+```
+
+如果不能用 `uv`，就用隔离 venv，不要写入 system Python：
+
+```bash
+python3 -m venv ~/.local/share/venvs/dotpanel
+~/.local/share/venvs/dotpanel/bin/pip install -e ~/src/dotpanel
+~/.local/share/venvs/dotpanel/bin/dotpanel --version
 ```
 
 完成第 4 步后，启动 `claude` / `codex` / `kimi` 会自动加载生成的 adapter，引用你的 persona + 通用 protocol。直接运行 `claude`、`codex`、`claw`、`codx` 走官方 provider/auth；relay backend 必须显式切换：`claw --variant NAME` 会通过 `dotpanel secrets run --backend claude --variant NAME` 启动，`codx --variant PROFILE` 或 `codx --let` 这类 shortcut 会通过 `dotpanel secrets run --backend codex --variant PROFILE -- codex -p PROFILE` 启动。

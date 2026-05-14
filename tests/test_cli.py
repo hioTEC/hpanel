@@ -256,6 +256,8 @@ class SkillWrapperTests(unittest.TestCase):
         self.assertIn("/install/dotpanel/protocol/skills/plan-discussion.md", body)
         self.assertNotIn("{{DOTPANEL_ROOT}}", body)
         self.assertIn(GENERATED_BANNER, body)
+        self.assertIn('description: "Use when the user invokes /plan.', body)
+        self.assertNotIn("description: |", body)
 
     def test_skill_wrapper_for_codex_uses_codex_invocation(self) -> None:
         body = skill_wrapper_body("review", "codex", "/install/dotpanel")

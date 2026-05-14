@@ -810,7 +810,7 @@ def _phase_pull_only(repos: Sequence[ResolvedRepo],
 
 
 def _phase_reload(state: SyncState) -> int:
-    """If dotpanel was among repos_pulled, pip install -e and execvp self.
+    """If dotpanel was among repos_pulled, reinstall editable tool and execvp self.
 
     On execvp success we never return — the new binary picks up post-reload.
     """
@@ -826,17 +826,20 @@ def _phase_reload(state: SyncState) -> int:
         print(f"WARN  reload: no editable source at {src}", file=sys.stderr)
         return 0
 
-    print(f"OK  reload: pip install -e {src}")
-    # --break-system-packages: required on PEP 668 distros (Debian 12+,
-    # Ubuntu 24.04+) where the system Python is EXTERNALLY-MANAGED; no-op
-    # on systems without that marker.
-    cp = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-e", str(src),
-         "--quiet", "--break-system-packages"],
-        check=False,
-    )
+    if shutil.which("uv"):
+        cmd = ["uv", "tool", "install", "--editable", str(src)]
+        label = f"uv tool install --editable {src}"
+    else:
+        cmd = [
+            sys.executable, "-m", "pip", "install", "-e", str(src),
+            "--quiet", "--break-system-packages",
+        ]
+        label = f"pip install -e {src}"
+
+    print(f"OK  reload: {label}")
+    cp = subprocess.run(cmd, check=False)
     if cp.returncode != 0:
-        print(f"FAIL  reload: pip install -e exited {cp.returncode}",
+        print(f"FAIL  reload: {label} exited {cp.returncode}",
               file=sys.stderr)
         return 2
 
@@ -1055,11 +1058,11 @@ Mutating (acquires ~/.dotpanel/sync.lock):
         Run `dotpanel leaks` per repo (mode from [sync] leak_mode_overrides),
         commit pending changes, rebase, push.
   pull  [--no-configure] [--force-restart]
-        Multi-phase: precheck -> pull-only -> reload (pip install -e +
-        execvp on dotpanel itself) -> post-reload (configure --check +
+        Multi-phase: precheck -> pull-only -> reload (uv tool install --editable
+        or venv pip fallback + execvp) -> post-reload (configure --check +
         configure --harness all).
   pull-only                     Phase 1 only: git pull on each repo.
-  reload                        Phase 2 only: pip install -e + execvp.
+  reload                        Phase 2 only: reinstall editable + execvp.
   post-reload                   Internal — invoked via execvp; runs
                                 configure --check + configure --harness all.
   resume [--no-configure]       Continue from the last checkpoint after a
@@ -1109,7 +1112,7 @@ def build_sync_parser(parser: argparse.ArgumentParser) -> None:
     s_pull.add_argument("--force-restart", action="store_true")
 
     sub.add_parser("pull-only", help="phase: git pull on each repo")
-    sub.add_parser("reload", help="phase: pip install -e + execvp self")
+    sub.add_parser("reload", help="phase: reinstall editable + execvp self")
 
     s_post = sub.add_parser("post-reload", help="phase: configure (internal)")
     s_post.add_argument("--no-configure", action="store_true")

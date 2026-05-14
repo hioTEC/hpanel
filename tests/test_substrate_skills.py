@@ -183,6 +183,8 @@ class SubstrateWrapperBodyTests(unittest.TestCase):
             self.assertIn("Source (substrate):", wrapper)
             self.assertIn(str(body_path.resolve()), wrapper)
             self.assertIn("name: teamleader", wrapper)
+            self.assertIn('description: "Use when the user invokes /teamleader.', wrapper)
+            self.assertNotIn("description: |", wrapper)
 
 
 class GatherOutputsSubstrateOverrideTests(unittest.TestCase):

@@ -1,14 +1,6 @@
-__pycache__/
-*.pyc
-.pytest_cache/
-.coverage
-dist/
-build/
-*.egg-info/
-
-# Persona bridge symlink — created by `dotpanel init`; points at private operator data.
-# MUST be gitignored to prevent accidental commit / packaging of private content.
-/persona
-
-# Operator-private agent journal / runs — never lives in dotpanel.
-.agents/
+.DS_Store
+*.tmp
+tmp/
+env.sh
+var/
+templates/

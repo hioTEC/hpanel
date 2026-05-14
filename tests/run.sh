@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+export HOME="$TMP/home"
+mkdir -p "$HOME/.agents/.dotpanel"
+cp -R "$ROOT/bin" "$HOME/.agents/.dotpanel/bin"
+
+sh -n "$ROOT/bin/dot"
+sh -n "$ROOT/bin/dkey"
+bash -n "$ROOT/bin/dot"
+bash -n "$ROOT/bin/dkey"
+
+sh "$HOME/.agents/.dotpanel/bin/dot" init --yes
+"$HOME/.agents/.dotpanel/bin/dot" doctor
+
+grep -qxF '/.dotpanel/' "$HOME/.agents/.gitignore"
+test -L "$HOME/.local/bin/dot"
+test -L "$HOME/.local/bin/dkey"
+test -f "$HOME/.claude/CLAUDE.md"
+test -f "$HOME/.codex/AGENTS.md"
+test -f "$HOME/.kimi/AGENTS.md"
+grep -q '`~/.agents/` is your memspace' "$HOME/.claude/CLAUDE.md"
+
+git -C "$HOME/.agents" init >/dev/null
+"$HOME/.agents/.dotpanel/bin/dot" sync status >/dev/null
+git -C "$HOME/.agents" status --short --ignored | grep -q '!! .dotpanel/'
+
+"$HOME/.agents/.dotpanel/bin/dkey" init
+"$HOME/.agents/.dotpanel/bin/dkey" status | grep -q 'active grant: none'
+"$HOME/.agents/.dotpanel/bin/dkey" off | grep -q 'DKEY_ACTIVE_GRANT'
+
+if command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1; then
+  "$HOME/.agents/.dotpanel/bin/dkey" keygen >/dev/null
+  printf 'TEST_SECRET=ok\n' > "$HOME/.agents/secrets/keys.env"
+  recipient="$(age-keygen -y "$HOME/.config/age/key.txt")"
+  age -r "$recipient" -o "$HOME/.agents/secrets/keys.env.age" "$HOME/.agents/secrets/keys.env"
+  printf 'grant:test:TEST_VALUE=TEST_SECRET\n' > "$HOME/.agents/secrets/dkey.conf"
+  # shellcheck disable=SC1090
+  . "$HOME/.agents/.dotpanel/env.sh"
+  dkey on --with test
+  test "${TEST_VALUE:-}" = "ok"
+  dkey off
+  test -z "${TEST_VALUE:-}"
+fi
+
+echo "OK"

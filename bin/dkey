@@ -1,0 +1,343 @@
+#!/bin/sh
+# dkey - small age-backed capability grants for CLI/resource operations.
+
+set -eu
+
+VERSION="0.1.0-vnext"
+
+HOME_DIR="${HOME:?HOME is required}"
+AGENTS_DIR="${DOT_AGENTS_DIR:-$HOME_DIR/.agents}"
+SECRETS_DIR="$AGENTS_DIR/secrets"
+KEYS_FILE="${DKEY_KEYS_FILE:-$SECRETS_DIR/keys.env.age}"
+GRANTS_FILE="${DKEY_GRANTS_FILE:-$SECRETS_DIR/dkey.conf}"
+AGE_IDENTITY_FILE="${DKEY_AGE_IDENTITY_FILE:-$HOME_DIR/.config/age/key.txt}"
+
+info() { printf 'OK  %s\n' "$*"; }
+warn() { printf 'WARN  %s\n' "$*" >&2; }
+fail() { printf 'FAIL  %s\n' "$*" >&2; exit 1; }
+
+usage() {
+    cat <<'EOF'
+dkey - age-backed capability grants
+
+Usage:
+  dkey init
+  dkey keygen
+  dkey edit
+  dkey list
+  dkey status
+  dkey doctor
+  dkey run --with GRANT -- COMMAND [ARGS...]
+  dkey on --with GRANT
+  dkey off
+  dkey version
+  dkey help
+
+Shell integration:
+  `dot init` installs a shell function that evals `dkey on/off` in the current
+  shell. Direct `dkey on` refuses to print secret-bearing shell code.
+EOF
+}
+
+version() {
+    printf 'dkey %s\n' "$VERSION"
+}
+
+need_age() {
+    command -v age >/dev/null 2>&1 || fail "age is required"
+}
+
+have_age_tools() {
+    command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1
+}
+
+ensure_dirs() {
+    mkdir -p "$SECRETS_DIR"
+}
+
+sample_keys() {
+    cat <<'EOF'
+# Plaintext template. Edit values, save, and dkey will encrypt it.
+# Format: NAME=value
+#
+# CLOUDFLARE_API_TOKEN=
+# GITHUB_TOKEN=
+EOF
+}
+
+sample_grants() {
+    cat <<'EOF'
+# dkey grants.
+# Format:
+#   grant:<name>:ENV_VAR=SECRET_NAME[,ENV_VAR2=SECRET_NAME2]
+#   extra:<name>:ENV_VAR=value[,ENV_VAR2=value2]
+#
+# Example:
+#   grant:cloudflare-readonly:CLOUDFLARE_API_TOKEN=CLOUDFLARE_READONLY_TOKEN
+#   grant:github-release:GITHUB_TOKEN=GITHUB_RELEASE_TOKEN
+EOF
+}
+
+keygen_cmd() {
+    command -v age-keygen >/dev/null 2>&1 || fail "age-keygen is required"
+    if [ -f "$AGE_IDENTITY_FILE" ]; then
+        info "age identity already exists: $AGE_IDENTITY_FILE"
+        return 0
+    fi
+    mkdir -p "$(dirname "$AGE_IDENTITY_FILE")"
+    age-keygen -o "$AGE_IDENTITY_FILE"
+    chmod 600 "$AGE_IDENTITY_FILE"
+    info "created age identity: $AGE_IDENTITY_FILE"
+}
+
+public_recipient_from_identity() {
+    [ -f "$AGE_IDENTITY_FILE" ] || return 1
+    age-keygen -y "$AGE_IDENTITY_FILE" 2>/dev/null
+}
+
+encrypt_plaintext() {
+    in="$1"
+    out="$2"
+    need_age
+    command -v age-keygen >/dev/null 2>&1 || fail "age-keygen is required"
+    recipient="$(public_recipient_from_identity)" || fail "age identity missing at $AGE_IDENTITY_FILE"
+    tmp="$out.$$"
+    age -r "$recipient" -o "$tmp" "$in"
+    mv "$tmp" "$out"
+}
+
+decrypt_keys() {
+    need_age
+    [ -f "$KEYS_FILE" ] || fail "keys file missing: $KEYS_FILE"
+    [ -f "$AGE_IDENTITY_FILE" ] || fail "age identity missing: $AGE_IDENTITY_FILE"
+    age -d -i "$AGE_IDENTITY_FILE" "$KEYS_FILE"
+}
+
+init_cmd() {
+    ensure_dirs
+    if [ ! -f "$GRANTS_FILE" ]; then
+        sample_grants > "$GRANTS_FILE"
+        info "created $GRANTS_FILE"
+    else
+        info "current $GRANTS_FILE"
+    fi
+    if [ ! -f "$KEYS_FILE" ]; then
+        template="$SECRETS_DIR/keys.env.template"
+        if [ ! -f "$template" ]; then
+            sample_keys > "$template"
+            info "created $template"
+        else
+            info "current $template"
+        fi
+        if have_age_tools && [ -f "$AGE_IDENTITY_FILE" ]; then
+            encrypt_plaintext "$template" "$KEYS_FILE"
+            info "created $KEYS_FILE"
+        else
+            warn "encrypted keys not created; install age and create $AGE_IDENTITY_FILE, then run dkey edit"
+        fi
+    else
+        info "current $KEYS_FILE"
+    fi
+}
+
+edit_cmd() {
+    ensure_dirs
+    editor="${EDITOR:-vi}"
+    tmp="$SECRETS_DIR/.keys.env.$$"
+    if [ -f "$KEYS_FILE" ]; then
+        decrypt_keys > "$tmp"
+    else
+        sample_keys > "$tmp"
+    fi
+    "$editor" "$tmp"
+    encrypt_plaintext "$tmp" "$KEYS_FILE"
+    rm -f "$tmp"
+    info "updated $KEYS_FILE"
+}
+
+grant_line() {
+    grant="$1"
+    [ -f "$GRANTS_FILE" ] || fail "grants file missing: $GRANTS_FILE"
+    grep -E "^grant:${grant}:" "$GRANTS_FILE" | tail -n 1 || true
+}
+
+extra_line() {
+    grant="$1"
+    [ -f "$GRANTS_FILE" ] || return 0
+    grep -E "^extra:${grant}:" "$GRANTS_FILE" | tail -n 1 || true
+}
+
+list_cmd() {
+    if [ ! -f "$GRANTS_FILE" ]; then
+        warn "grants file missing: $GRANTS_FILE"
+        return 0
+    fi
+    awk -F: '/^grant:/ { print $2 }' "$GRANTS_FILE" | sort -u
+}
+
+lookup_secret() {
+    name="$1"
+    # Reads plaintext env lines from stdin.
+    awk -F= -v key="$name" '
+        $0 ~ /^[[:space:]]*#/ { next }
+        $1 == key {
+            sub(/^[^=]*=/, "")
+            print
+            found=1
+            exit
+        }
+        END { if (!found) exit 1 }
+    '
+}
+
+shell_quote() {
+    # Single-quote for POSIX shell eval.
+    sed "s/'/'\\\\''/g; s/^/'/; s/$/'/"
+}
+
+emit_exports_for_grant() {
+    grant="$1"
+    line="$(grant_line "$grant")"
+    [ -n "$line" ] || fail "grant not found: $grant"
+    mapping="${line#grant:${grant}:}"
+    keys_plain="$(decrypt_keys)"
+
+    old_ifs="$IFS"
+    IFS=','
+    for pair in $mapping; do
+        env_name="${pair%%=*}"
+        secret_name="${pair#*=}"
+        [ -n "$env_name" ] && [ -n "$secret_name" ] || fail "bad grant mapping: $pair"
+        value="$(printf '%s\n' "$keys_plain" | lookup_secret "$secret_name")" || fail "secret not found: $secret_name"
+        quoted="$(printf '%s' "$value" | shell_quote)"
+        printf 'export %s=%s\n' "$env_name" "$quoted"
+        managed="${managed:-}${managed:+ }$env_name"
+    done
+    IFS="$old_ifs"
+
+    extra="$(extra_line "$grant")"
+    if [ -n "$extra" ]; then
+        extras="${extra#extra:${grant}:}"
+        IFS=','
+        for pair in $extras; do
+            env_name="${pair%%=*}"
+            value="${pair#*=}"
+            quoted="$(printf '%s' "$value" | shell_quote)"
+            printf 'export %s=%s\n' "$env_name" "$quoted"
+            managed="${managed:-}${managed:+ }$env_name"
+        done
+        IFS="$old_ifs"
+    fi
+
+    printf 'export DKEY_ACTIVE_GRANT=%s\n' "$(printf '%s' "$grant" | shell_quote)"
+    printf 'export DKEY_MANAGED_VARS=%s\n' "$(printf '%s' "${managed:-}" | shell_quote)"
+}
+
+shell_on_cmd() {
+    [ "${DKEY_EMIT_SHELL:-}" = "1" ] || fail "dkey on requires dot shell integration; run '. ~/.agents/.dotpanel/env.sh' first"
+    grant=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --with)
+                shift
+                [ "$#" -gt 0 ] || fail "--with requires a grant"
+                grant="$1"
+                ;;
+            *) fail "unknown shell on argument: $1" ;;
+        esac
+        shift
+    done
+    [ -n "$grant" ] || fail "shell on requires --with GRANT"
+    emit_exports_for_grant "$grant"
+}
+
+shell_off_cmd() {
+    cat <<'EOF'
+if [ -n "${DKEY_MANAGED_VARS:-}" ]; then
+    for _dkey_var in $DKEY_MANAGED_VARS; do
+        unset "$_dkey_var"
+    done
+fi
+unset DKEY_ACTIVE_GRANT
+unset DKEY_MANAGED_VARS
+unset _dkey_var
+EOF
+}
+
+run_cmd() {
+    grant=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --with)
+                shift
+                [ "$#" -gt 0 ] || fail "--with requires a grant"
+                grant="$1"
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *) fail "unknown run argument: $1" ;;
+        esac
+        shift
+    done
+    [ -n "$grant" ] || fail "run requires --with GRANT"
+    [ "$#" -gt 0 ] || fail "run requires a command after --"
+
+    env_script="$(emit_exports_for_grant "$grant")"
+    # Apply only in this process, then exec target.
+    eval "$env_script"
+    exec "$@"
+}
+
+status_cmd() {
+    if [ -n "${DKEY_ACTIVE_GRANT:-}" ]; then
+        printf 'active grant: %s\n' "$DKEY_ACTIVE_GRANT"
+        printf 'managed vars: %s\n' "${DKEY_MANAGED_VARS:-}"
+    else
+        printf 'active grant: none\n'
+    fi
+}
+
+doctor_cmd() {
+    problems=0
+    command -v age >/dev/null 2>&1 && info "age found" || { warn "age missing"; problems=$((problems + 1)); }
+    command -v age-keygen >/dev/null 2>&1 && info "age-keygen found" || { warn "age-keygen missing"; problems=$((problems + 1)); }
+    [ -f "$AGE_IDENTITY_FILE" ] && info "age identity exists: $AGE_IDENTITY_FILE" || warn "age identity missing: $AGE_IDENTITY_FILE"
+    [ -f "$KEYS_FILE" ] && info "keys file exists: $KEYS_FILE" || warn "keys file missing: $KEYS_FILE"
+    [ -f "$GRANTS_FILE" ] && info "grants file exists: $GRANTS_FILE" || warn "grants file missing: $GRANTS_FILE"
+    [ "$problems" -eq 0 ] || return 2
+}
+
+shell_cmd() {
+    sub="${1:-}"
+    if [ "$#" -gt 0 ]; then
+        shift
+    fi
+    case "$sub" in
+        on) shell_on_cmd "$@" ;;
+        off) shell_off_cmd ;;
+        *) fail "usage: dkey shell on --with GRANT | dkey shell off" ;;
+    esac
+}
+
+cmd="${1:-help}"
+if [ "$#" -gt 0 ]; then
+    shift
+fi
+
+case "$cmd" in
+    init) init_cmd "$@" ;;
+    keygen) keygen_cmd "$@" ;;
+    edit) edit_cmd "$@" ;;
+    list) list_cmd "$@" ;;
+    run) run_cmd "$@" ;;
+    on) shell_on_cmd "$@" ;;
+    off) shell_off_cmd "$@" ;;
+    shell) shell_cmd "$@" ;;
+    status) status_cmd "$@" ;;
+    doctor) doctor_cmd "$@" ;;
+    version|--version|-v) version ;;
+    help|--help|-h) usage ;;
+    *) fail "unknown command: $cmd" ;;
+esac

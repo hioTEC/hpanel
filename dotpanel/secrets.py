@@ -13,6 +13,7 @@ Subcommands:
     secrets run --key NAME [--key NAME...] -- cmd args...
     secrets run --backend <provider> [--variant <name>] -- cmd args...
     secrets export --scope llm [--shell {bash,zsh,fish}]
+    secrets export --backend <provider> [--variant <name>] [--shell {bash,zsh,fish}]
     secrets rotate-key [--add-recipient <pubkey-path>]
     secrets help
 
@@ -516,7 +517,43 @@ def cmd_run(
 
 # --- export -------------------------------------------------------------
 
-def cmd_export(scope: str, shell: str) -> int:
+def cmd_export(
+    scope: str | None,
+    shell: str,
+    backend: str | None = None,
+    variant: str | None = None,
+) -> int:
+    if variant and not backend:
+        raise SecretsError("--variant requires --backend", exit_code=2)
+    if bool(scope) == bool(backend):
+        raise SecretsError(
+            "pass exactly one of: --scope llm OR --backend <provider> "
+            "[--variant <name>]",
+            exit_code=2,
+        )
+
+    if backend is not None:
+        ctx = _load_context()
+        age_key = _resolve_age_key()
+        scratch = _unpack_to_dir(ctx.bundle_path, age_key)
+        try:
+            env_path = scratch / "env"
+            variant_name, variant_def = _resolve_backend_variant(ctx, backend, variant)
+            secret_value = _env_value(env_path, variant_def.key)
+            if secret_value is None:
+                raise SecretsError(
+                    f"backend {backend}.{variant_name} references secret "
+                    f"{variant_def.key!r} which is not in bundle.",
+                    exit_code=2,
+                )
+            for name, value in _backend_env(
+                ctx, backend, variant_name, variant_def, secret_value
+            ).items():
+                print(_render_export_line(name, value, shell))
+            return 0
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+
     if scope != "llm":
         raise SecretsError(
             "v5 removed bulk `secrets export`. Only `dotpanel secrets export "
@@ -758,6 +795,7 @@ def _print_help() -> int:
         "  dotpanel secrets run --key NAME [--key NAME ...] -- cmd args...\n"
         "  dotpanel secrets run --backend <provider> [--variant <name>] -- cmd ...\n"
         "  dotpanel secrets export --scope llm [--shell bash|zsh|fish]\n"
+        "  dotpanel secrets export --backend <provider> [--variant <name>] [--shell bash|zsh|fish]\n"
         "  dotpanel secrets rotate-key [--add-recipient <pubkey-path>]\n"
         "  dotpanel secrets help\n",
     )
@@ -789,9 +827,13 @@ def build_secrets_parser(parser: argparse.ArgumentParser) -> None:
     run_p.add_argument("rest", nargs=argparse.REMAINDER,
                        help="--key NAME ... or --backend X --variant Y, then -- and the command")
 
-    export_p = sub.add_parser("export", help="emit eval-able export lines for a scope")
-    export_p.add_argument("--scope", required=True, choices=("llm",),
-                          help="ONLY --scope llm is supported (no bulk decrypt)")
+    export_p = sub.add_parser("export", help="emit eval-able export lines")
+    export_p.add_argument("--scope", default=None, choices=("llm",),
+                          help="scope export; ONLY llm is supported")
+    export_p.add_argument("--backend", default=None,
+                          help="backend provider to export as env")
+    export_p.add_argument("--variant", default=None,
+                          help="backend variant to export (defaults to provider default)")
     export_p.add_argument("--shell", default="bash", choices=VALID_SHELLS,
                           help="output dialect (bash/zsh share syntax)")
 
@@ -818,7 +860,7 @@ def dispatch_secrets(args: argparse.Namespace) -> int:
             keys, backend, variant, cmd = _parse_run_args(list(args.rest))
             return cmd_run(keys, backend, variant, cmd)
         if sub == "export":
-            return cmd_export(args.scope, args.shell)
+            return cmd_export(args.scope, args.shell, args.backend, args.variant)
         if sub == "rotate-key":
             return cmd_rotate_key(args.add_recipient)
         raise SecretsError(f"unknown secrets subcommand: {sub}", exit_code=2)

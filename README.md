@@ -79,7 +79,11 @@ dotpanel configure --harness all
 dotpanel doctor && dotpanel audit
 ```
 
-After step 4, `claude` / `codex` / `kimi` auto-load the generated wrappers which reference your persona + the universal protocol. Codex user skills render to `~/.agents/skills/`, while Codex config and runtime stay in `~/.codex/`. `codx` is a thin Codex profile launcher: `codx --let` maps to `codex -p let`, and generated Codex providers use `env_key` so API keys stay in environment variables loaded by shell startup / VSCode Remote `server-env-setup`. `configure` also renders `~/.codex/rules/default.rules`, the regular-mode command prefix allowlist for narrow trusted commands such as `git` and common test/build invocations. For day-to-day updates across machines, run `dotpanel sync pull` — it pulls configured repos, reinstalls dotpanel if its source changed, and re-runs `configure --harness all`.
+After step 4, `claude` / `codex` / `kimi` auto-load the generated adapters which reference your persona + the universal protocol. Direct `claude`, `codex`, `claw`, and `codx` use the official provider/auth path. Relay backends are explicit: `claw --variant NAME` runs Claude through `dotpanel secrets run --backend claude --variant NAME`, and `codx --variant PROFILE` or shortcuts such as `codx --let` run Codex through `dotpanel secrets run --backend codex --variant PROFILE -- codex -p PROFILE`.
+
+VS Code extensions start their own agent servers directly, so switch them with launcher injection mode. For Codex, `codx --vscode --variant PROFILE` writes a managed block in Remote `server-env-setup` and an isolated `CODEX_HOME=~/.codex-vscode/PROFILE`; use `codx --vscode --openai` to switch back to the official OpenAI config at `~/.codex`. For Claude Code, `claw --vscode --variant NAME` injects the Claude relay env, and `claw --vscode --official` restores the official Claude path. Restart VS Code Remote / vscode-server after changing either one.
+
+Codex user skills render to `~/.agents/skills/`, while Codex config and runtime stay in `~/.codex/`. `configure` also renders `~/.codex/rules/default.rules`, the regular-mode command prefix allowlist for narrow trusted commands such as `git` and common test/build invocations. For day-to-day updates across machines, run `dotpanel sync pull` — it pulls configured repos, reinstalls dotpanel if its source changed, and re-runs `configure --harness all`.
 
 ## CLI
 

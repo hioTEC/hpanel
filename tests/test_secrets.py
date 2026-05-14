@@ -223,6 +223,38 @@ class FullSecretsFlowTests(unittest.TestCase):
         # GH_TOKEN is explicitly NOT in llm_scope
         self.assertNotIn("GH_TOKEN", out)
 
+    def test_export_backend_emits_only_resolved_variant_env(self) -> None:
+        self._silent_run(cmd_init, True, None, False)
+        self._seed_bundle({
+            "ANDYFENG_CLAUDE_KEY": "secret-andy",
+            "OPENAI_API_KEY": "secret-openai",
+        })
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cmd_export(scope=None, shell="bash", backend="claude", variant="andy")
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn("export ANTHROPIC_AUTH_TOKEN=secret-andy", out)
+        self.assertIn("export ANTHROPIC_BASE_URL=https://api.example.invalid", out)
+        self.assertIn("export DOTPANEL_MODEL=claude-fake-test", out)
+        self.assertIn("export TEST_EXTRA=yes", out)
+        self.assertNotIn("OPENAI_API_KEY", out)
+        self.assertNotIn("ANDYFENG_CLAUDE_KEY", out)
+
+    def test_export_requires_exactly_one_selector(self) -> None:
+        with self.assertRaises(SecretsError) as ctx:
+            cmd_export(scope=None, shell="bash", backend=None, variant=None)
+        self.assertEqual(ctx.exception.exit_code, 2)
+
+        with self.assertRaises(SecretsError) as ctx:
+            cmd_export(scope="llm", shell="bash", backend="claude", variant=None)
+        self.assertEqual(ctx.exception.exit_code, 2)
+
+        with self.assertRaises(SecretsError) as ctx:
+            cmd_export(scope=None, shell="bash", backend=None, variant="andy")
+        self.assertEqual(ctx.exception.exit_code, 2)
+        self.assertIn("--variant requires --backend", str(ctx.exception))
+
     def test_export_without_scope_llm_refuses(self) -> None:
         # cmd_export only runs when --scope llm is parsed. Manually pass other:
         with self.assertRaises(SecretsError) as ctx:
@@ -378,15 +410,11 @@ class BackendEnvComposeTests(unittest.TestCase):
 class BulkExportRefusedTests(unittest.TestCase):
     """Threat-model invariant: there is no bulk-decrypt path. EC-3."""
 
-    def test_dispatch_with_no_scope_argparse_rejects(self) -> None:
-        # argparse calls sys.exit(2) when a required arg is missing, which
-        # surfaces as SystemExit; that *is* the contract — the kernel never
-        # decrypts the bundle for a bare `export`.
+    def test_dispatch_with_no_export_selector_rejects(self) -> None:
         from dotpanel.secrets import main
         with contextlib.redirect_stderr(io.StringIO()):
-            with self.assertRaises(SystemExit) as ctx:
-                main(["export"])
-        self.assertEqual(ctx.exception.code, 2)
+            rc = main(["export"])
+        self.assertEqual(rc, 2)
 
     def test_dispatch_with_scope_all_rejected_by_argparse(self) -> None:
         from dotpanel.secrets import main

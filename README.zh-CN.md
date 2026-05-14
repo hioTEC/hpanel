@@ -79,7 +79,11 @@ dotpanel configure --harness all
 dotpanel doctor && dotpanel audit
 ```
 
-完成第 4 步后，启动 `claude` / `codex` / `kimi` 会自动加载生成的 wrapper，引用你的 persona + 通用 protocol。`codx` 是很薄的 Codex profile launcher：`codx --let` 等价于 `codex -p let`；生成的 Codex provider 使用 `env_key`，API key 仍由 shell startup / VSCode Remote `server-env-setup` 注入环境变量，不写入 config 明文。`configure` 也会渲染 `~/.codex/rules/default.rules`，这是 regular mode 的窄前缀放行列表，包含 `git` 和常见 test/build 命令。日常多机同步使用 `dotpanel sync pull`——它会拉取配置的 repo、若 dotpanel 源码变更则重新安装、并重新执行 `configure --harness all`。
+完成第 4 步后，启动 `claude` / `codex` / `kimi` 会自动加载生成的 adapter，引用你的 persona + 通用 protocol。直接运行 `claude`、`codex`、`claw`、`codx` 走官方 provider/auth；relay backend 必须显式切换：`claw --variant NAME` 会通过 `dotpanel secrets run --backend claude --variant NAME` 启动，`codx --variant PROFILE` 或 `codx --let` 这类 shortcut 会通过 `dotpanel secrets run --backend codex --variant PROFILE -- codex -p PROFILE` 启动。
+
+VS Code extension 会直接启动自己的 agent server，不会经过 launcher，所以用 launcher 的 VS Code 注入模式切换。Codex 用 `codx --vscode --variant PROFILE`，它会在 Remote `server-env-setup` 写入 managed block，并为该 relay provider 使用隔离的 `CODEX_HOME=~/.codex-vscode/PROFILE`；切回官方 OpenAI 用 `codx --vscode --openai`。Claude Code 用 `claw --vscode --variant NAME` 注入 Claude relay env，切回官方 Claude 用 `claw --vscode --official`。改完任意一个都要重启 VS Code Remote / vscode-server。
+
+Codex user skills 渲染到 `~/.agents/skills/`，Codex config 和 runtime 仍在 `~/.codex/`。`configure` 也会渲染 `~/.codex/rules/default.rules`，这是 regular mode 的窄前缀放行列表，包含 `git` 和常见 test/build 命令。日常多机同步使用 `dotpanel sync pull`——它会拉取配置的 repo、若 dotpanel 源码变更则重新安装、并重新执行 `configure --harness all`。
 
 ## CLI 命令
 

@@ -690,9 +690,9 @@ def cmd_doctor(paths: DotpanelPaths,
 
     # Invariant 9: backend vs llm_scope coherence (WARN). Every
     # [backends.*].variants.*.key should match at least one [secrets]
-    # llm_scope fnmatch pattern. Mismatched keys mean the variant works for
-    # the launcher but vscode-server (which inherits via `secrets export
-    # --scope llm`) does NOT have the key.
+    # llm_scope fnmatch pattern. Mismatched keys mean broad llm-scope exports
+    # will not include the key; launcher paths and backend-specific exports
+    # still resolve the variant directly.
     sub = _try_find_substrate()
     if sub is not None:
         import fnmatch as _fnmatch
@@ -708,12 +708,14 @@ def cmd_doctor(paths: DotpanelPaths,
                             f"backends.{provider_name}.variants.{variant_name}.key "
                             f"= {key!r} does not match any [secrets] "
                             f"llm_scope pattern. `{provider_name} --{variant_name}` "
-                            "will work, but vscode-server (which inherits via "
-                            "`secrets export --scope llm`) will NOT have this key."
+                            "will work, but broad `secrets export --scope llm` "
+                            "will NOT include this key. For VS Code extension "
+                            "backends, use `codx --vscode --variant <profile>` "
+                            "or `claw --vscode --variant <name>`."
                         )
 
-    # Invariant 16: VSCode Codex extension needs server-env-setup so the
-    # extension host inherits env_key-based LLM credentials.
+    # Invariant 16: VS Code agent extensions need server-env-setup so the
+    # extension host inherits backend-specific LLM credentials.
     for vscode_home_name in (".vscode-server", ".vscode-server-insiders"):
         vscode_home = paths.home / vscode_home_name
         extensions_dir = vscode_home / "extensions"
@@ -723,11 +725,28 @@ def cmd_doctor(paths: DotpanelPaths,
             child.is_dir() and child.name.startswith("openai.chatgpt-")
             for child in extensions_dir.iterdir()
         )
-        if has_codex_extension and not (vscode_home / "server-env-setup").is_file():
+        has_claude_extension = any(
+            child.is_dir()
+            and (
+                child.name.startswith("anthropic.claude-code-")
+                or child.name.startswith("claude-ai.claude-code-")
+            )
+            for child in extensions_dir.iterdir()
+        )
+        setup_exists = (vscode_home / "server-env-setup").is_file()
+        if has_codex_extension and not setup_exists:
             warnings.append(
                 f"{vscode_home}/server-env-setup missing. VSCode Codex extension "
-                "may not inherit LLM env keys; install a setup file that runs "
-                "`dotpanel secrets export --scope llm` before vscode-server starts."
+                "may not inherit the intended Codex backend; run "
+                "`codx --vscode --variant <profile>` for a relay backend or "
+                "`codx --vscode --openai` to restore official OpenAI."
+            )
+        if has_claude_extension and not setup_exists:
+            warnings.append(
+                f"{vscode_home}/server-env-setup missing. VSCode Claude Code "
+                "extension may not inherit the intended Claude backend; run "
+                "`claw --vscode --variant <name>` for a relay backend or "
+                "`claw --vscode --official` to restore official Claude."
             )
 
     # Invariant 12: multi-checkout detection (WARN). `pip show dotpanel`
@@ -2061,7 +2080,7 @@ def build_parser() -> argparse.ArgumentParser:
     # secrets: scoped secrets API (was tools/bin/secrets).
     secrets_p = sub.add_parser(
         "secrets",
-        help="scoped secrets API (init/list/edit/run/export --scope llm/rotate-key)",
+        help="scoped secrets API (init/list/edit/run/export/rotate-key)",
     )
     build_secrets_parser(secrets_p)
 

@@ -290,6 +290,7 @@ class ConfigureTests(unittest.TestCase):
             config = output / "codex" / "config.toml"
             self.assertTrue(config.exists())
             content = config.read_text()
+            self.assertIn('model_provider = "openai"', content)
             self.assertIn("[profiles.andy]", content)
             self.assertIn('model_provider = "andyfeng"', content)
             self.assertIn("[profiles.let]", content)

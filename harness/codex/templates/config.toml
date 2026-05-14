@@ -2,11 +2,11 @@
 # Source: harness/codex/templates/config.toml
 # Update: dotpanel configure --harness codex
 #
-# env_key style: api keys live in env (loaded by shell startup / VSCode
-# server-env-setup via `dotpanel secrets export --scope llm`). VSCode Codex
-# extension and command-line codex both read keys from env — no inline secrets.
+# Direct `codex`/`codx` use the official OpenAI provider. Relay providers stay
+# behind named profiles and `codx --vscode --variant <profile>`; API keys are
+# read from env_key and are never written inline.
 
-model_provider = "andyfeng"
+model_provider = "openai"
 model = "gpt-5.5"
 review_model = "gpt-5.5"
 model_reasoning_effort = "xhigh"
@@ -14,7 +14,8 @@ disable_response_storage = true
 network_access = "enabled"
 windows_wsl_setup_acknowledged = true
 model_context_window = 1000000
-model_auto_compact_token_limit = 900000
+model_auto_compact_token_limit = 500000
+model_catalog_json = "/home/ubuntu/.codex/model-catalog.gpt55-1m.json"
 preferred_auth_method = "apikey"
 personality = "pragmatic"
 approvals_reviewer = "user"

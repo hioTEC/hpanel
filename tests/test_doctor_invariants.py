@@ -161,6 +161,7 @@ env_alias = "OPENAI_API_KEY"
             combined = stdout.getvalue() + stderr.getvalue()
             self.assertIn("TENCENT_CODEX_KEY", combined)
             self.assertIn("llm_scope", combined)
+            self.assertIn("codx --vscode --variant <profile>", combined)
 
     def test_matching_backend_key_no_warn(self) -> None:
         with TemporaryDirectory() as t:
@@ -193,6 +194,53 @@ env_alias = "ANTHROPIC_AUTH_TOKEN"
                     cmd_doctor(paths, skip_stale_rename=True)
             combined = stdout.getvalue() + stderr.getvalue()
             self.assertNotIn("ANDYFENG_CLAUDE_KEY", combined)
+
+
+class VSCodeExtensionEnvTests(unittest.TestCase):
+    """Invariant 16: VS Code agent extensions need server-env-setup."""
+
+    def test_claude_code_extension_without_setup_warns(self) -> None:
+        with TemporaryDirectory() as t:
+            paths = _seed_minimal_dotpanel(Path(t), Path(t))
+            extension = paths.home / ".vscode-server" / "extensions" / "anthropic.claude-code-1.2.3"
+            extension.mkdir(parents=True)
+
+            stdout, stderr = StringIO(), StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                cmd_doctor(paths, skip_stale_rename=True)
+            combined = stdout.getvalue() + stderr.getvalue()
+            self.assertIn("VSCode Claude Code extension", combined)
+            self.assertIn("claw --vscode --variant <name>", combined)
+            self.assertIn("claw --vscode --official", combined)
+
+    def test_codex_extension_without_setup_warns(self) -> None:
+        with TemporaryDirectory() as t:
+            paths = _seed_minimal_dotpanel(Path(t), Path(t))
+            extension = paths.home / ".vscode-server" / "extensions" / "openai.chatgpt-1.2.3"
+            extension.mkdir(parents=True)
+
+            stdout, stderr = StringIO(), StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                cmd_doctor(paths, skip_stale_rename=True)
+            combined = stdout.getvalue() + stderr.getvalue()
+            self.assertIn("VSCode Codex extension", combined)
+            self.assertIn("codx --vscode --variant <profile>", combined)
+            self.assertIn("codx --vscode --openai", combined)
+
+    def test_existing_setup_suppresses_extension_warnings(self) -> None:
+        with TemporaryDirectory() as t:
+            paths = _seed_minimal_dotpanel(Path(t), Path(t))
+            extensions = paths.home / ".vscode-server" / "extensions"
+            (extensions / "anthropic.claude-code-1.2.3").mkdir(parents=True)
+            (extensions / "openai.chatgpt-1.2.3").mkdir(parents=True)
+            (paths.home / ".vscode-server" / "server-env-setup").write_text("# setup\n")
+
+            stdout, stderr = StringIO(), StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                cmd_doctor(paths, skip_stale_rename=True)
+            combined = stdout.getvalue() + stderr.getvalue()
+            self.assertNotIn("VSCode Claude Code extension", combined)
+            self.assertNotIn("VSCode Codex extension", combined)
 
 
 class SchemaValidationTests(unittest.TestCase):

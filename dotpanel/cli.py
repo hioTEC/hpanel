@@ -317,9 +317,10 @@ def is_managed_json(path: Path, home: Path) -> bool:
 class SubstrateSkill:
     """A skill discovered from <substrate>/skills/*.md.
 
-    Frontmatter-driven: name + description + supported_harnesses come from the
-    file's YAML front matter. Substrate skills override public skills of the
-    same name (filename collision = substrate wins, per D7).
+    Frontmatter-driven: name + description come from the file's YAML front
+    matter. `supported_harnesses` is optional and defaults to every harness.
+    Substrate skills override public skills of the same name (filename
+    collision = substrate wins, per D7).
     """
 
     name: str
@@ -840,8 +841,15 @@ Frontmatter schema:
 name: my-team-pattern
 description: Use when the user invokes /my-team-pattern. <one-line trigger>
 type: skill
-supported_harnesses: [claude, codex]
 ---
+```
+
+By default, substrate skills render to every harness that has a native skill
+surface. Add `supported_harnesses` only when a skill depends on harness-specific
+tools:
+
+```yaml
+supported_harnesses: [claude]
 ```
 
 After dropping a skill file here, run `dotpanel configure --harness all`

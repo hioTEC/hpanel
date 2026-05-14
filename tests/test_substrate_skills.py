@@ -3,6 +3,7 @@
 Tests cover:
 - `_discover_substrate_skills` parses YAML frontmatter and skips malformed files with a WARN
 - `[skills] disabled` blacklist applies to both substrate and public skills
+- Missing `supported_harnesses` defaults to all harnesses
 - Frontmatter `supported_harnesses` scope
 - `.dotpanel.toml [skills.<name>] harnesses` toml-side scope
 - Substrate skill overrides public skill on filename collision
@@ -49,6 +50,18 @@ supported_harnesses: [claude]
 ---
 
 # Team Leader
+
+(body)
+"""
+
+INTERVIEW_FRONTMATTER = """\
+---
+name: interview
+description: Load when planning a non-trivial change and user preferences must be elicited.
+type: skill
+---
+
+# Interview
 
 (body)
 """
@@ -121,6 +134,17 @@ class DiscoverSubstrateSkillsTests(unittest.TestCase):
                 "Orchestrate", discovered["teamleader"].description
             )
 
+    def test_missing_supported_harnesses_defaults_to_all_harnesses(self) -> None:
+        with TemporaryDirectory() as t:
+            skills_dir = Path(t) / "skills"
+            skills_dir.mkdir()
+            (skills_dir / "interview.md").write_text(INTERVIEW_FRONTMATTER)
+            discovered = _discover_substrate_skills(skills_dir)
+            self.assertEqual(
+                discovered["interview"].supported_harnesses,
+                ("claude", "codex", "kimi"),
+            )
+
     def test_skips_malformed_with_warn(self) -> None:
         with TemporaryDirectory() as t:
             skills_dir = Path(t) / "skills"
@@ -179,6 +203,7 @@ class GatherOutputsSubstrateOverrideTests(unittest.TestCase):
         skills = substrate / "skills"
         skills.mkdir()
         (skills / "curriculum-bridge.md").write_text(CURRICULUM_FRONTMATTER)
+        (skills / "interview.md").write_text(INTERVIEW_FRONTMATTER)
         (skills / "teamleader.md").write_text(TEAMLEADER_FRONTMATTER)
         (substrate / ".dotpanel.toml").write_text(
             '[dotpanel]\nschema_version = "1.0"\n'
@@ -206,6 +231,8 @@ class GatherOutputsSubstrateOverrideTests(unittest.TestCase):
         outputs = cli_mod._gather_outputs(paths, "codex")
         rels = [rel for rel, _ in outputs]
         self.assertNotIn("skills/teamleader/SKILL.md", rels)
+        # interview omits supported_harnesses, so it defaults to all harnesses.
+        self.assertIn("skills/interview/SKILL.md", rels)
         # curriculum-bridge declares [claude, codex, kimi] so it appears here.
         self.assertIn("skills/curriculum-bridge/SKILL.md", rels)
 

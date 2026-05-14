@@ -79,7 +79,7 @@ dotpanel configure --harness all
 dotpanel doctor && dotpanel audit
 ```
 
-After step 4, `claude` / `codex` / `kimi` auto-load the generated wrappers which reference your persona + the universal protocol. Codex user skills render to `~/.agents/skills/`, while Codex config and runtime stay in `~/.codex/`. For day-to-day updates across machines, run `dotpanel sync pull` — it pulls configured repos, reinstalls dotpanel if its source changed, and re-runs `configure --harness all`.
+After step 4, `claude` / `codex` / `kimi` auto-load the generated wrappers which reference your persona + the universal protocol. Codex user skills render to `~/.agents/skills/`, while Codex config and runtime stay in `~/.codex/`. `codx` is a thin Codex profile launcher: `codx --let` maps to `codex -p let`, and generated Codex providers use `env_key` so API keys stay in environment variables loaded by shell startup / VSCode Remote `server-env-setup`. `configure` also renders `~/.codex/rules/default.rules`, the regular-mode command prefix allowlist for narrow trusted commands such as `git` and common test/build invocations. For day-to-day updates across machines, run `dotpanel sync pull` — it pulls configured repos, reinstalls dotpanel if its source changed, and re-runs `configure --harness all`.
 
 ## CLI
 
@@ -110,7 +110,7 @@ protocol/
   reference/            Cross-project knowledge
 harness/
   claude/templates/     CLAUDE.md, settings.json, statusline.py
-  codex/templates/      AGENTS.md, config.toml
+  codex/templates/      AGENTS.md, config.toml, rules/default.rules
   kimi/templates/       AGENTS.md
 dotpanel/               Python CLI source
 tools/bin/              Bundled launchers (claw, codx, dot)

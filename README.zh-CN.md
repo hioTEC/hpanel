@@ -79,7 +79,7 @@ dotpanel configure --harness all
 dotpanel doctor && dotpanel audit
 ```
 
-完成第 4 步后，启动 `claude` / `codex` / `kimi` 会自动加载生成的 wrapper，引用你的 persona + 通用 protocol。日常多机同步使用 `dotpanel sync pull`——它会拉取配置的 repo、若 dotpanel 源码变更则重新安装、并重新执行 `configure --harness all`。
+完成第 4 步后，启动 `claude` / `codex` / `kimi` 会自动加载生成的 wrapper，引用你的 persona + 通用 protocol。`codx` 是很薄的 Codex profile launcher：`codx --let` 等价于 `codex -p let`；生成的 Codex provider 使用 `env_key`，API key 仍由 shell startup / VSCode Remote `server-env-setup` 注入环境变量，不写入 config 明文。`configure` 也会渲染 `~/.codex/rules/default.rules`，这是 regular mode 的窄前缀放行列表，包含 `git` 和常见 test/build 命令。日常多机同步使用 `dotpanel sync pull`——它会拉取配置的 repo、若 dotpanel 源码变更则重新安装、并重新执行 `configure --harness all`。
 
 ## CLI 命令
 
@@ -110,7 +110,7 @@ protocol/
   reference/            跨项目知识
 harness/
   claude/templates/     CLAUDE.md, settings.json, statusline.py
-  codex/templates/      AGENTS.md, config.toml
+  codex/templates/      AGENTS.md, config.toml, rules/default.rules
   kimi/templates/       AGENTS.md
 dotpanel/               Python CLI 源码
 tools/bin/              自带 launcher（claw, codx, dot）

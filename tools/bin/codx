@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# codx -- thin codex profile launcher
+# codx -- thin codex profile launcher with on-demand secrets injection
 # Usage: codx [--andy | --let | --variant PROFILE] [-- codex args...]
 #
-# Profiles live in ~/.codex/config.toml and keep provider credentials env-keyed.
-# Keys are loaded by shell startup / VSCode server-env-setup via
-# `dotpanel secrets export --scope llm`; codx never writes auth.json or inline keys.
+# No profile  -> exec codex directly (uses default config, env must be present).
+# With profile -> dotpanel secrets run --backend codex --variant <profile>.
 set -euo pipefail
 
 PROFILE=""
@@ -26,6 +25,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -n "$PROFILE" ]]; then
-    exec codex -p "$PROFILE" "$@"
+    exec dotpanel secrets run --backend codex --variant "$PROFILE" -- codex -p "$PROFILE" "$@"
 fi
 exec codex "$@"

@@ -35,6 +35,7 @@ JSON files cannot carry comments. Managed JSON targets are declared in
 
 ```text
 ~/.claude/settings.json
+~/.codex/model-catalog.gpt55-1m.json
 ```
 
 Conflict handling:

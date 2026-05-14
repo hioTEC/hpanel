@@ -94,6 +94,7 @@ BANNER_SCAN_LINES = 10  # Banner detection scans first N lines (accommodates YAM
 # JSON files dotpanel manages by path-list convention (no in-file banner possible).
 DOTPANEL_MANAGED_JSON = [
     "~/.claude/settings.json",
+    "~/.codex/model-catalog.gpt55-1m.json",
 ]
 
 # Set of valid placeholders in template files (EC-7). render_text WARNs on
@@ -1075,6 +1076,12 @@ def _is_codex_default_rules(rel_path: str, harness: str) -> bool:
     return harness == "codex" and rel_path == "rules/default.rules"
 
 
+def _allows_literal_template_braces(rel_path: str, harness: str) -> bool:
+    # Codex model catalogs carry model-message templates such as
+    # `{{ personality }}` that Codex, not dotpanel, owns.
+    return harness == "codex" and rel_path == "model-catalog.gpt55-1m.json"
+
+
 def _configure_one_file(rel_path: str, content: str, output_root: Path, harness: str,
                         force: bool, dry_run: bool, home: Path,
                         result: ConfigureResult) -> None:
@@ -1614,7 +1621,7 @@ def cmd_configure(paths: DotpanelPaths, harness: str, check: bool, force: bool,
             continue
         for rel, content in outputs:
             # Validate placeholder rendering on every output (catches template bugs)
-            if "{{" in content or "}}" in content:
+            if ("{{" in content or "}}" in content) and not _allows_literal_template_braces(rel, target):
                 overall_result.conflicts.append(f"{target}/{rel}: unrendered placeholder in output")
             # Run the conflict planner (also in --check mode, just without writes)
             _configure_one_file(rel, content, out_root, target, force, plan_dry_run, paths.home, overall_result)

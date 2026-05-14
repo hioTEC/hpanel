@@ -29,6 +29,7 @@ from dotpanel.cli import (
     _excluded_path,
     render_text,
     skill_wrapper_body,
+    _allows_literal_template_braces,
 )
 
 
@@ -112,6 +113,11 @@ class ConstantsTests(unittest.TestCase):
         # C12: skill renames to "sync" but canonical body remains config-sync.md.
         from dotpanel.cli import CANONICAL_SKILL_FILES
         self.assertEqual(CANONICAL_SKILL_FILES["sync"], "config-sync.md")
+
+    def test_codex_model_catalog_allows_literal_model_templates(self) -> None:
+        self.assertTrue(_allows_literal_template_braces("model-catalog.gpt55-1m.json", "codex"))
+        self.assertFalse(_allows_literal_template_braces("config.toml", "codex"))
+        self.assertFalse(_allows_literal_template_braces("settings.json", "claude"))
 
 
 class RenderTextTests(unittest.TestCase):
@@ -297,7 +303,15 @@ class ConfigureTests(unittest.TestCase):
             self.assertIn('model_provider = "letaicode"', content)
             self.assertIn('env_key = "ANDYFENG_CODEX_KEY"', content)
             self.assertIn('env_key = "LETAICODE_CODEX_KEY"', content)
+            self.assertIn('model_catalog_json = "/home/ubuntu/.codex/model-catalog.gpt55-1m.json"', content)
             self.assertNotIn("api_key =", content)
+            catalog = output / "codex" / "model-catalog.gpt55-1m.json"
+            self.assertTrue(catalog.exists())
+            catalog_content = catalog.read_text()
+            self.assertIn('"slug": "gpt-5.5"', catalog_content)
+            self.assertIn('"context_window": 1000000', catalog_content)
+            self.assertIn('"auto_compact_token_limit": 500000', catalog_content)
+            self.assertIn('"effective_context_window_percent": 60', catalog_content)
 
     def test_configure_codex_renders_default_permission_rules(self) -> None:
         with TemporaryDirectory() as t:

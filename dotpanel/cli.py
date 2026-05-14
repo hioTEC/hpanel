@@ -1024,6 +1024,11 @@ class ConfigureResult:
 
 
 def _excluded_path(rel_path: str, harness: str) -> bool:
+    # Codex stores persistent local permission rules under ~/.codex/rules/.
+    # Dotpanel owns only this single generated regular-mode allowlist; other
+    # rule files remain runtime-local and excluded.
+    if harness == "codex" and rel_path == "rules/default.rules":
+        return False
     excluded = {
         "claude": CLAUDE_EXCLUDED,
         "codex": CODEX_EXCLUDED,
@@ -1037,6 +1042,10 @@ def _excluded_path(rel_path: str, harness: str) -> bool:
             if Path(rel_path).match(glob):
                 return True
     return False
+
+
+def _is_codex_default_rules(rel_path: str, harness: str) -> bool:
+    return harness == "codex" and rel_path == "rules/default.rules"
 
 
 def _configure_one_file(rel_path: str, content: str, output_root: Path, harness: str,
@@ -1068,6 +1077,14 @@ def _configure_one_file(rel_path: str, content: str, output_root: Path, harness:
                 result.conflicts.append(f"symlink to external target: {target} -> {link_target}")
                 return
         elif target.is_file():
+            if _is_codex_default_rules(rel_path, harness):
+                if target.read_text(encoding="utf-8") == content:
+                    return
+                action = f"OVERWRITE {target}"
+                if not dry_run:
+                    _write_atomic(target, content)
+                result.actions.append(action)
+                return
             if _is_json(rel_path):
                 if is_managed_json(target, home) or force:
                     action = f"OVERWRITE-JSON {target}"

@@ -8,7 +8,7 @@ The launchers are tiny bash shims; we test them by:
 This catches:
 - variant flag parsing (--andy / --let / --kimi / --variant NAME)
 - target dir resolution for `claw` (~/src/X first, ~/vendor/X fallback)
-- exec chain (launcher → dotpanel secrets run → tool)
+- exec chain (launcher -> dotpanel secrets run -> tool, or codx -> codex profile)
 """
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ def _run_launcher(launcher: str, args: list[str], fake_home: Path) -> subprocess
         fake = bin_dir / name
         fake.write_text(textwrap.dedent(f"""\
             #!/usr/bin/env bash
+            printf 'CALL:{name}\\n' >> "{log}"
             printf '%s\\n' "$@" >> "{log}"
             exit 0
         """))
@@ -75,6 +76,7 @@ class ClawTests(unittest.TestCase):
         lines = self._log_lines()
         # No "secrets run" in the log because OAuth doesn't need it.
         self.assertNotIn("secrets", lines)
+        self.assertIn("CALL:claude", lines)
         self.assertIn("--dangerously-skip-permissions", lines)
         self.assertIn("--effort", lines)
 
@@ -186,25 +188,37 @@ class CodxTests(unittest.TestCase):
             return []
         return [l for l in log.read_text().splitlines() if l]
 
-    def test_default_calls_codex_backend(self) -> None:
+    def test_default_calls_codex_directly(self) -> None:
         result = _run_launcher("codx", [], self.home)
         self.assertEqual(result.returncode, 0)
         lines = self._log_lines()
-        self.assertIn("--backend", lines)
-        self.assertIn("codex", lines)
-        idx = lines.index("--variant")
-        self.assertEqual(lines[idx + 1], "andy")
+        self.assertEqual(lines, ["CALL:codex"])
 
-    def test_let_flag(self) -> None:
+    def test_let_flag_uses_codex_profile(self) -> None:
         result = _run_launcher("codx", ["--let", "some", "arg"], self.home)
         self.assertEqual(result.returncode, 0)
         lines = self._log_lines()
-        idx = lines.index("--variant")
-        self.assertEqual(lines[idx + 1], "let")
-        tail = lines[lines.index("--") + 1:]
-        self.assertIn("codex", tail)
-        self.assertIn("some", tail)
-        self.assertIn("arg", tail)
+        self.assertEqual(lines, ["CALL:codex", "-p", "let", "some", "arg"])
+
+    def test_andy_flag_uses_codex_profile(self) -> None:
+        result = _run_launcher("codx", ["--andy"], self.home)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self._log_lines(), ["CALL:codex", "-p", "andy"])
+
+    def test_explicit_variant_uses_matching_profile_name(self) -> None:
+        result = _run_launcher("codx", ["--variant", "custom", "--", "--search"], self.home)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self._log_lines(), ["CALL:codex", "-p", "custom", "--search"])
+
+    def test_profile_flag_uses_matching_profile_name(self) -> None:
+        result = _run_launcher("codx", ["--profile", "custom"], self.home)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self._log_lines(), ["CALL:codex", "-p", "custom"])
+
+    def test_unknown_codex_flags_pass_through(self) -> None:
+        result = _run_launcher("codx", ["--search"], self.home)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self._log_lines(), ["CALL:codex", "--search"])
 
 
 if __name__ == "__main__":

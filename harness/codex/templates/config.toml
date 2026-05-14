@@ -19,6 +19,12 @@ preferred_auth_method = "apikey"
 personality = "pragmatic"
 approvals_reviewer = "user"
 
+[profiles.andy]
+model_provider = "andyfeng"
+
+[profiles.let]
+model_provider = "letaicode"
+
 [model_providers.andyfeng]
 name = "andyfeng"
 base_url = "https://api.andyfeng.me"

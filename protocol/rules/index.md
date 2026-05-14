@@ -87,36 +87,34 @@ rules:
 
 # Rules Index
 
-This file is the machine-readable registry for global rule load classes. The
-frontmatter above is authoritative; the table below is only a reading aid.
+Machine-readable registry above; human summary below.
 
 ## Classes
 
 | Class | Meaning |
 |---|---|
-| Kernel | Always loaded at startup because the agent must know it before any action. |
-| Router | Always loaded at startup because it points to the next needed rule. |
-| Gate | Body is read before changing files or state for the matching trigger. |
-| Specialist | Body is read only when a task, skill, or project document names it. |
+| Kernel | Always loaded at startup. Agent must know before any action. |
+| Router | Always loaded at startup. Points to next needed rule. |
+| Gate | Pointer loaded at startup; body read before changing files or state. |
+| Specialist | Read only when a task, skill, or project document names it. |
 
 ## Registry
 
-| ID | Class | Path | Exposure |
-|---|---|---|---|
-| workspace-kernel | kernel | `{{DOTPANEL_ROOT}}/protocol/workspace.md` | startup adapter |
-| workspace-router | router | `{{DOTPANEL_ROOT}}/protocol/workspace.md` | startup adapter |
-| rule-index | gate | `{{DOTPANEL_ROOT}}/protocol/rules/index.md` | workspace router |
-| harness-bridge | gate | `{{DOTPANEL_ROOT}}/protocol/rules/harness-bridge.md` | workspace router |
-| work-quality | gate | `{{DOTPANEL_ROOT}}/protocol/rules/work-quality.md` | workspace router |
-| module-discipline | gate | `{{DOTPANEL_ROOT}}/protocol/rules/module-discipline.md` | workspace router |
-| design-contract | gate | `{{DOTPANEL_ROOT}}/protocol/rules/design-contract.md` | workspace router |
-| active-run | gate | `{{DOTPANEL_ROOT}}/protocol/rules/active-run.md` | workspace router |
-| content-principles | gate | `{{DOTPANEL_ROOT}}/protocol/rules/content-principles.md` | workspace router |
-| symlink-registry | gate | `{{DOTPANEL_ROOT}}/protocol/rules/symlink-registry.md` | workspace router |
-| collaboration | specialist | `{{DOTPANEL_ROOT}}/protocol/rules/collaboration.md` | workspace router |
-| ui-design | specialist | `{{DOTPANEL_ROOT}}/protocol/rules/ui-design.md` | workspace router |
-| adr-template | specialist | `{{DOTPANEL_ROOT}}/protocol/rules/adr-template.md` | rules index |
-| interaction | specialist | `{{DOTPANEL_ROOT}}/protocol/rules/interaction.md` | rules index |
-| three-layers | specialist | `{{DOTPANEL_ROOT}}/protocol/rules/three-layers.md` | rules index |
-| scenario-driven-flow | specialist | `{{DOTPANEL_ROOT}}/protocol/rules/scenario-driven-flow.md` | rules index |
-
+| ID | Class | Path |
+|---|---|---|
+| workspace-kernel | kernel | `protocol/workspace.md` |
+| workspace-router | router | `protocol/workspace.md` |
+| rule-index | gate | `protocol/rules/index.md` |
+| harness-bridge | gate | `protocol/rules/harness-bridge.md` |
+| work-quality | gate | `protocol/rules/work-quality.md` |
+| module-discipline | gate | `protocol/rules/module-discipline.md` |
+| design-contract | gate | `protocol/rules/design-contract.md` |
+| active-run | gate | `protocol/rules/active-run.md` |
+| content-principles | gate | `protocol/rules/content-principles.md` |
+| symlink-registry | gate | `protocol/rules/symlink-registry.md` |
+| collaboration | specialist | `protocol/rules/collaboration.md` |
+| ui-design | specialist | `protocol/rules/ui-design.md` |
+| adr-template | specialist | `protocol/rules/adr-template.md` |
+| interaction | specialist | `protocol/rules/interaction.md` |
+| three-layers | specialist | `protocol/rules/three-layers.md` |
+| scenario-driven-flow | specialist | `protocol/rules/scenario-driven-flow.md` |

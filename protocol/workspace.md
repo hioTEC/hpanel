@@ -149,4 +149,4 @@ Harness startup files and user-facing skill entries are adapters. Canonical rule
 | collaboration / A2A | `{{DOTPANEL_ROOT}}/protocol/rules/collaboration.md` |
 | protocol reference (cross-project agent infrastructure knowledge) | `{{DOTPANEL_ROOT}}/protocol/reference/` |
 
-For operator-specific operations (secret management, infrastructure inventory, sync workflow), see the persona file referenced above this protocol.
+Operator-specific operations (secret management, infrastructure inventory, sync workflow) → persona file referenced above.

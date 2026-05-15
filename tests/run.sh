@@ -16,6 +16,7 @@ bash -n "$ROOT/bin/dkey"
 
 sh "$HOME/.agents/.dotpanel/bin/dot" init --yes
 "$HOME/.agents/.dotpanel/bin/dot" doctor
+"$HOME/.agents/.dotpanel/bin/dot" set -a
 
 grep -qxF '/.dotpanel/' "$HOME/.agents/.gitignore"
 test -L "$HOME/.local/bin/dot"
@@ -35,12 +36,19 @@ git -C "$HOME/.agents" status --short --ignored | grep -q '!! .dotpanel/'
 
 if command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1; then
   "$HOME/.agents/.dotpanel/bin/dkey" keygen >/dev/null
+  "$HOME/.agents/.dotpanel/bin/dkey" set TEST_SECRET ok
+  "$HOME/.agents/.dotpanel/bin/dkey" list | grep -qx 'TEST_SECRET'
+  # shellcheck disable=SC1090
+  . "$HOME/.agents/.dotpanel/env.sh"
+  dkey on
+  test "${TEST_SECRET:-}" = "ok"
+  dkey off
+  test -z "${TEST_SECRET:-}"
+
   printf 'TEST_SECRET=ok\n' > "$HOME/.agents/secrets/keys.env"
   recipient="$(age-keygen -y "$HOME/.config/age/key.txt")"
   age -r "$recipient" -o "$HOME/.agents/secrets/keys.env.age" "$HOME/.agents/secrets/keys.env"
   printf 'grant:test:TEST_VALUE=TEST_SECRET\n' > "$HOME/.agents/secrets/dkey.conf"
-  # shellcheck disable=SC1090
-  . "$HOME/.agents/.dotpanel/env.sh"
   dkey on --with test
   test "${TEST_VALUE:-}" = "ok"
   dkey off

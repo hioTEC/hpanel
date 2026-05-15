@@ -11,6 +11,7 @@ SECRETS_DIR="$AGENTS_DIR/secrets"
 KEYS_FILE="${DKEY_KEYS_FILE:-$SECRETS_DIR/keys.env.age}"
 GRANTS_FILE="${DKEY_GRANTS_FILE:-$SECRETS_DIR/dkey.conf}"
 AGE_IDENTITY_FILE="${DKEY_AGE_IDENTITY_FILE:-$HOME_DIR/.config/age/key.txt}"
+TEMPLATE_DIR="$AGENTS_DIR/.dotpanel/templates/secrets"
 
 info() { printf 'OK  %s\n' "$*"; }
 warn() { printf 'WARN  %s\n' "$*" >&2; }
@@ -23,12 +24,14 @@ dkey - age-backed capability grants
 Usage:
   dkey init
   dkey keygen
+  dkey set NAME VALUE
+  dkey set NAME=VALUE
   dkey edit
   dkey list
   dkey status
   dkey doctor
   dkey run --with GRANT -- COMMAND [ARGS...]
-  dkey on --with GRANT
+  dkey on [--with GRANT]
   dkey off
   dkey version
   dkey help
@@ -36,6 +39,7 @@ Usage:
 Shell integration:
   `dot init` installs a shell function that evals `dkey on/off` in the current
   shell. Direct `dkey on` refuses to print secret-bearing shell code.
+  `dkey on` exports all encrypted keys; `dkey off` removes all variables it set.
 EOF
 }
 
@@ -56,6 +60,10 @@ ensure_dirs() {
 }
 
 sample_keys() {
+    if [ -f "$TEMPLATE_DIR/keys.env.template" ]; then
+        cat "$TEMPLATE_DIR/keys.env.template"
+        return 0
+    fi
     cat <<'EOF'
 # Plaintext template. Edit values, save, and dkey will encrypt it.
 # Format: NAME=value
@@ -66,6 +74,10 @@ EOF
 }
 
 sample_grants() {
+    if [ -f "$TEMPLATE_DIR/dkey.conf" ]; then
+        cat "$TEMPLATE_DIR/dkey.conf"
+        return 0
+    fi
     cat <<'EOF'
 # dkey grants.
 # Format:
@@ -113,6 +125,63 @@ decrypt_keys() {
     age -d -i "$AGE_IDENTITY_FILE" "$KEYS_FILE"
 }
 
+validate_key_name() {
+    name="$1"
+    printf '%s' "$name" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$' || fail "invalid key name: $name"
+}
+
+set_key_cmd() {
+    ensure_dirs
+    [ "$#" -gt 0 ] || fail "usage: dkey set NAME VALUE | dkey set NAME=VALUE"
+    case "$1" in
+        *=*)
+            name="${1%%=*}"
+            value="${1#*=}"
+            [ "$#" -eq 1 ] || fail "usage: dkey set NAME=VALUE"
+            ;;
+        *)
+            name="$1"
+            shift
+            [ "$#" -gt 0 ] || fail "usage: dkey set NAME VALUE"
+            value="$*"
+            ;;
+    esac
+    validate_key_name "$name"
+
+    tmp="$SECRETS_DIR/.keys.env.$$"
+    if [ -f "$KEYS_FILE" ]; then
+        decrypt_keys > "$tmp"
+    else
+        sample_keys > "$tmp"
+    fi
+
+    if grep -q -E "^${name}=" "$tmp"; then
+        tmp2="$SECRETS_DIR/.keys.env.set.$$"
+        awk -v key="$name" -v value="$value" '
+            BEGIN { done = 0 }
+            $0 ~ /^[[:space:]]*#/ { print; next }
+            index($0, key "=") == 1 {
+                print key "=" value
+                done = 1
+                next
+            }
+            { print }
+            END {
+                if (!done) {
+                    print key "=" value
+                }
+            }
+        ' "$tmp" > "$tmp2"
+        mv "$tmp2" "$tmp"
+    else
+        printf '%s=%s\n' "$name" "$value" >> "$tmp"
+    fi
+
+    encrypt_plaintext "$tmp" "$KEYS_FILE"
+    rm -f "$tmp"
+    info "set $name in $KEYS_FILE"
+}
+
 init_cmd() {
     ensure_dirs
     if [ ! -f "$GRANTS_FILE" ]; then
@@ -133,7 +202,7 @@ init_cmd() {
             encrypt_plaintext "$template" "$KEYS_FILE"
             info "created $KEYS_FILE"
         else
-            warn "encrypted keys not created; install age and create $AGE_IDENTITY_FILE, then run dkey edit"
+            warn "encrypted keys not created; install age, run dkey keygen, then run dkey set NAME VALUE"
         fi
     else
         info "current $KEYS_FILE"
@@ -168,6 +237,17 @@ extra_line() {
 }
 
 list_cmd() {
+    if [ ! -f "$KEYS_FILE" ]; then
+        warn "keys file missing: $KEYS_FILE"
+        return 0
+    fi
+    decrypt_keys | awk -F= '
+        $0 ~ /^[[:space:]]*#/ { next }
+        $1 ~ /^[A-Za-z_][A-Za-z0-9_]*$/ { print $1 }
+    ' | sort -u
+}
+
+grant_list_cmd() {
     if [ ! -f "$GRANTS_FILE" ]; then
         warn "grants file missing: $GRANTS_FILE"
         return 0
@@ -233,6 +313,34 @@ emit_exports_for_grant() {
     printf 'export DKEY_MANAGED_VARS=%s\n' "$(printf '%s' "${managed:-}" | shell_quote)"
 }
 
+emit_exports_for_all_keys() {
+    keys_plain="$(decrypt_keys)"
+    managed=""
+    printf '%s\n' "$keys_plain" | while IFS= read -r line; do
+        case "$line" in
+            ""|\#*) continue ;;
+            *=*)
+                env_name="${line%%=*}"
+                value="${line#*=}"
+                validate_key_name "$env_name"
+                quoted="$(printf '%s' "$value" | shell_quote)"
+                printf 'export %s=%s\n' "$env_name" "$quoted"
+                managed="${managed:-}${managed:+ }$env_name"
+                ;;
+        esac
+    done
+    managed="$(printf '%s\n' "$keys_plain" | awk -F= '
+        $0 ~ /^[[:space:]]*#/ { next }
+        $1 ~ /^[A-Za-z_][A-Za-z0-9_]*$/ {
+            if (managed != "") managed = managed " "
+            managed = managed $1
+        }
+        END { print managed }
+    ')"
+    printf 'export DKEY_ACTIVE_GRANT=%s\n' "'all'"
+    printf 'export DKEY_MANAGED_VARS=%s\n' "$(printf '%s' "$managed" | shell_quote)"
+}
+
 shell_on_cmd() {
     [ "${DKEY_EMIT_SHELL:-}" = "1" ] || fail "dkey on requires dot shell integration; run '. ~/.agents/.dotpanel/env.sh' first"
     grant=""
@@ -247,8 +355,11 @@ shell_on_cmd() {
         esac
         shift
     done
-    [ -n "$grant" ] || fail "shell on requires --with GRANT"
-    emit_exports_for_grant "$grant"
+    if [ -n "$grant" ]; then
+        emit_exports_for_grant "$grant"
+    else
+        emit_exports_for_all_keys
+    fi
 }
 
 shell_off_cmd() {
@@ -317,7 +428,7 @@ shell_cmd() {
     case "$sub" in
         on) shell_on_cmd "$@" ;;
         off) shell_off_cmd ;;
-        *) fail "usage: dkey shell on --with GRANT | dkey shell off" ;;
+        *) fail "usage: dkey shell on [--with GRANT] | dkey shell off" ;;
     esac
 }
 
@@ -329,8 +440,10 @@ fi
 case "$cmd" in
     init) init_cmd "$@" ;;
     keygen) keygen_cmd "$@" ;;
+    set) set_key_cmd "$@" ;;
     edit) edit_cmd "$@" ;;
     list) list_cmd "$@" ;;
+    grants) grant_list_cmd "$@" ;;
     run) run_cmd "$@" ;;
     on) shell_on_cmd "$@" ;;
     off) shell_off_cmd "$@" ;;

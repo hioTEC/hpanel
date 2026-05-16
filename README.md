@@ -58,8 +58,8 @@ git clone https://github.com/hioTEC/dotpanel.git ~/.agents/.dotpanel
 sh ~/.agents/.dotpanel/bin/dot init --no-entry
 ```
 
-`dot init` installs `dot` and `dkey` into `~/.local/bin`, writes shell
-integration, and renders the harness entry files. For an already-open shell:
+`dot init` adds `~/.agents/.dotpanel/bin` to PATH through shell integration and
+renders the harness entry files. For an already-open shell:
 
 ```bash
 . ~/.agents/.dotpanel/env.sh
@@ -123,7 +123,7 @@ dot self update
 
 `dot` manages machine wiring around the memspace:
 
-- `dot init` bootstraps shell integration and symlinks commands.
+- `dot init` bootstraps shell integration and adds dotpanel commands to PATH.
 - `dot set` renders minimal harness entry files from `~/.agents/AGENTS.md`.
 - `dot sync` runs git operations in `~/.agents`.
 - `dot self` runs git operations in `~/.agents/.dotpanel`.
@@ -164,8 +164,6 @@ print secret-bearing shell code; use the shell function installed by `dot init`.
 
 `dot init` may create or update:
 
-- `~/.local/bin/dot`
-- `~/.local/bin/dkey`
 - `~/.agents/.dotpanel/env.sh`
 - `~/.claude/CLAUDE.md`
 - `~/.codex/AGENTS.md`

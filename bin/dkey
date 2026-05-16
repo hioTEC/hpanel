@@ -24,6 +24,8 @@ dkey - age-backed capability grants
 Usage:
   dkey init
   dkey keygen
+  dkey identity import PATH [--force]
+  dkey identity import --stdin [--force]
   dkey set NAME VALUE
   dkey set NAME=VALUE
   dkey edit
@@ -100,6 +102,69 @@ keygen_cmd() {
     age-keygen -o "$AGE_IDENTITY_FILE"
     chmod 600 "$AGE_IDENTITY_FILE"
     info "created age identity: $AGE_IDENTITY_FILE"
+}
+
+identity_import_cmd() {
+    command -v age-keygen >/dev/null 2>&1 || fail "age-keygen is required"
+    src=""
+    force=false
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --stdin)
+                [ -z "$src" ] || fail "identity source already set"
+                src="-"
+                ;;
+            --force)
+                force=true
+                ;;
+            -h|--help)
+                printf '%s\n' "Usage: dkey identity import PATH [--force] | dkey identity import --stdin [--force]"
+                return 0
+                ;;
+            -*)
+                fail "unknown identity import argument: $1"
+                ;;
+            *)
+                [ -z "$src" ] || fail "identity source already set"
+                src="$1"
+                ;;
+        esac
+        shift
+    done
+
+    [ -n "$src" ] || fail "identity import requires PATH or --stdin"
+    if [ -f "$AGE_IDENTITY_FILE" ] && ! $force; then
+        fail "age identity already exists: $AGE_IDENTITY_FILE; pass --force to replace it"
+    fi
+
+    mkdir -p "$(dirname "$AGE_IDENTITY_FILE")"
+    tmp="$AGE_IDENTITY_FILE.$$"
+    if [ "$src" = "-" ]; then
+        cat > "$tmp"
+    else
+        [ -f "$src" ] || fail "identity source not found: $src"
+        cp "$src" "$tmp"
+    fi
+
+    age-keygen -y "$tmp" >/dev/null 2>&1 || {
+        rm -f "$tmp"
+        fail "invalid age identity"
+    }
+    chmod 600 "$tmp"
+    mv "$tmp" "$AGE_IDENTITY_FILE"
+    info "imported age identity: $AGE_IDENTITY_FILE"
+}
+
+identity_cmd() {
+    sub="${1:-}"
+    if [ "$#" -gt 0 ]; then
+        shift
+    fi
+    case "$sub" in
+        import) identity_import_cmd "$@" ;;
+        *) fail "usage: dkey identity import PATH [--force] | dkey identity import --stdin [--force]" ;;
+    esac
 }
 
 public_recipient_from_identity() {
@@ -487,6 +552,7 @@ fi
 case "$cmd" in
     init) init_cmd "$@" ;;
     keygen) keygen_cmd "$@" ;;
+    identity) identity_cmd "$@" ;;
     set) set_key_cmd "$@" ;;
     edit) edit_cmd "$@" ;;
     list) list_cmd "$@" ;;

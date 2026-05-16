@@ -72,6 +72,18 @@ claw='claude --dangerously-skip-permissions'
 codx='codex --dangerously-bypass-approvals-and-sandbox'
 ```
 
+更新 dotpanel 后（`dot self update` 或 `dot path`），重新加载：
+
+```bash
+. ~/.agents/.dotpanel/env.sh
+```
+
+如果 alias 仍然缺失（`claw: command not found`），先重新生成 env 文件：
+
+```bash
+dot path && . ~/.agents/.dotpanel/env.sh
+```
+
 ## 日常命令
 
 编辑 `~/.agents/AGENTS.md` 后重新渲染 harness entry：

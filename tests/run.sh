@@ -26,6 +26,8 @@ test -f "$HOME/.claude/CLAUDE.md"
 test -f "$HOME/.codex/AGENTS.md"
 test -f "$HOME/.kimi/AGENTS.md"
 grep -q '`~/.agents/` is your memspace' "$HOME/.claude/CLAUDE.md"
+grep -qxF "alias claw='claude --dangerously-skip-permissions'" "$HOME/.agents/.dotpanel/env.sh"
+grep -qxF "alias codx='codex --dangerously-bypass-approvals-and-sandbox'" "$HOME/.agents/.dotpanel/env.sh"
 
 git -C "$HOME/.agents" init >/dev/null
 "$HOME/.agents/.dotpanel/bin/dot" sync status >/dev/null
@@ -67,6 +69,103 @@ if command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1; then
   test -z "${OTHER_VALUE:-}"
   run_out="$("$HOME/.agents/.dotpanel/bin/dkey" run --with test --with other -- sh -c 'printf "%s:%s:%s" "$TEST_VALUE" "$OTHER_VALUE" "$DKEY_ACTIVE_GRANT"')"
   test "$run_out" = "ok:fine:test,other"
+
+  cat > "$HOME/.agents/secrets/dkey.providers.json" <<'JSON'
+{
+  "version": 1,
+  "defaults": {
+    "claude": {
+      "settings_path": "~/.claude/settings.json",
+      "home_path": "~/.claude.json",
+      "home": {"hasCompletedOnboarding": true},
+      "settings": {"env": {"API_TIMEOUT_MS": "3000000"}},
+      "managed_env_keys": [
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "API_TIMEOUT_MS"
+      ]
+    },
+    "codex": {"config_path": "~/.codex/config.toml"}
+  },
+  "providers": {
+    "ok": {
+      "default_profile": "default",
+      "secret": "TEST_SECRET",
+      "profiles": {
+        "default": {
+          "claude": {
+            "settings": {
+              "env": {
+                "ANTHROPIC_BASE_URL": "https://example.test/anthropic",
+                "ANTHROPIC_AUTH_TOKEN": {"secret": "TEST_SECRET"},
+                "ANTHROPIC_MODEL": "model-pro",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": "model-flash"
+              }
+            }
+          },
+          "codex": {
+            "model": "model-pro",
+            "model_provider": "ok",
+            "model_provider_config": {
+              "name": "OK",
+              "base_url": "https://example.test/v1",
+              "wire_api": "responses",
+              "requires_openai_auth": true
+            },
+            "status": "supported"
+          },
+          "env": {"TEST_SECRET": {"secret": "TEST_SECRET"}}
+        }
+      }
+    },
+    "blocked": {
+      "default_profile": "default",
+      "secret": "TEST_SECRET",
+      "profiles": {
+        "default": {
+          "claude": {
+            "settings": {
+              "env": {
+                "ANTHROPIC_BASE_URL": "https://blocked.test/anthropic",
+                "ANTHROPIC_AUTH_TOKEN": {"secret": "TEST_SECRET"}
+              }
+            }
+          },
+          "codex": {
+            "model": "blocked-model",
+            "model_provider": "blocked",
+            "model_provider_config": {
+              "name": "Blocked",
+              "base_url": "https://blocked.test/v1",
+              "wire_api": "chat"
+            },
+            "status": "unsupported",
+            "status_message": "blocked for test"
+          },
+          "env": {"TEST_SECRET": {"secret": "TEST_SECRET"}}
+        }
+      }
+    }
+  }
+}
+JSON
+  "$HOME/.agents/.dotpanel/bin/dot" use codex:ok
+  grep -q 'model_provider = "ok"' "$HOME/.codex/config.toml"
+  grep -q 'wire_api = "responses"' "$HOME/.codex/config.toml"
+  jq -e '.auth_mode == "apikey" and .OPENAI_API_KEY == "ok"' "$HOME/.codex/auth.json" >/dev/null
+  "$HOME/.agents/.dotpanel/bin/dot" use all:blocked 2> "$TMP/dot-use-blocked.err"
+  grep -q 'blocked for test' "$TMP/dot-use-blocked.err"
+  jq -e '.env.ANTHROPIC_BASE_URL == "https://blocked.test/anthropic"' "$HOME/.claude/settings.json" >/dev/null
+  if "$HOME/.agents/.dotpanel/bin/dot" use codex:blocked 2> "$TMP/dot-use-blocked-strict.err"; then
+    exit 1
+  fi
+  grep -q 'blocked for test' "$TMP/dot-use-blocked-strict.err"
+  if "$HOME/.agents/.dotpanel/bin/dot" use ok --harness codex 2> "$TMP/dot-use-old-syntax.err"; then
+    exit 1
+  fi
+  grep -q 'HARNESS:BACKEND' "$TMP/dot-use-old-syntax.err"
 fi
 
 echo "OK"

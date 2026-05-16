@@ -65,6 +65,13 @@ integration, and renders the harness entry files. For an already-open shell:
 . ~/.agents/.dotpanel/env.sh
 ```
 
+The shell integration also defines two convenience aliases:
+
+```bash
+claw='claude --dangerously-skip-permissions'
+codx='codex --dangerously-bypass-approvals-and-sandbox'
+```
+
 ## Everyday Commands
 
 Render harness entry files after editing `~/.agents/AGENTS.md`:

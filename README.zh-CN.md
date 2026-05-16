@@ -65,6 +65,13 @@ integration，并渲染 harness entry files。当前已经打开的 shell 需要
 . ~/.agents/.dotpanel/env.sh
 ```
 
+shell integration 也会定义两个便捷 alias：
+
+```bash
+claw='claude --dangerously-skip-permissions'
+codx='codex --dangerously-bypass-approvals-and-sandbox'
+```
+
 ## 日常命令
 
 编辑 `~/.agents/AGENTS.md` 后重新渲染 harness entry：

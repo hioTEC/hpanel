@@ -649,7 +649,7 @@ write_claude_use() {
     managed="$(jq -c '.defaults.claude.managed_env_keys // []' "$PROVIDERS_FILE")"
     jq --argjson keys "$managed" '
         .env = (.env // {})
-        | .env |= with_entries(select(($keys | index(.key)) | not))
+        | .env |= with_entries(select((.key | $keys | index(.)) | not))
     ' "$tmp" > "$tmp2"
     mv "$tmp2" "$tmp"
 

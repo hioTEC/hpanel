@@ -593,6 +593,12 @@ doctor_cmd() {
     else
         warn "age missing; dkey encrypted grants will not work yet"
     fi
+    if command -v jq >/dev/null 2>&1; then
+        info "jq found"
+    else
+        warn "jq missing; dkey provider JSON features will not work"
+        problems=$((problems + 1))
+    fi
     if [ "$problems" -gt 0 ]; then
         return 2
     fi

@@ -30,8 +30,8 @@ Usage:
   dkey list
   dkey status
   dkey doctor
-  dkey run --with GRANT -- COMMAND [ARGS...]
-  dkey on [--with GRANT]
+  dkey run --with GRANT [--with GRANT...] -- COMMAND [ARGS...]
+  dkey on [--with GRANT...]
   dkey off
   dkey version
   dkey help
@@ -313,6 +313,52 @@ emit_exports_for_grant() {
     printf 'export DKEY_MANAGED_VARS=%s\n' "$(printf '%s' "${managed:-}" | shell_quote)"
 }
 
+emit_exports_for_grants() {
+    grants="$1"
+    [ -n "$grants" ] || fail "grant list is empty"
+    keys_plain="$(decrypt_keys)"
+    managed=""
+    active=""
+
+    for grant in $grants; do
+        line="$(grant_line "$grant")"
+        [ -n "$line" ] || fail "grant not found: $grant"
+        mapping="${line#grant:${grant}:}"
+
+        old_ifs="$IFS"
+        IFS=','
+        for pair in $mapping; do
+            env_name="${pair%%=*}"
+            secret_name="${pair#*=}"
+            [ -n "$env_name" ] && [ -n "$secret_name" ] || fail "bad grant mapping: $pair"
+            value="$(printf '%s\n' "$keys_plain" | lookup_secret "$secret_name")" || fail "secret not found: $secret_name"
+            quoted="$(printf '%s' "$value" | shell_quote)"
+            printf 'export %s=%s\n' "$env_name" "$quoted"
+            managed="${managed:-}${managed:+ }$env_name"
+        done
+        IFS="$old_ifs"
+
+        extra="$(extra_line "$grant")"
+        if [ -n "$extra" ]; then
+            extras="${extra#extra:${grant}:}"
+            IFS=','
+            for pair in $extras; do
+                env_name="${pair%%=*}"
+                value="${pair#*=}"
+                quoted="$(printf '%s' "$value" | shell_quote)"
+                printf 'export %s=%s\n' "$env_name" "$quoted"
+                managed="${managed:-}${managed:+ }$env_name"
+            done
+            IFS="$old_ifs"
+        fi
+
+        active="${active:-}${active:+,}$grant"
+    done
+
+    printf 'export DKEY_ACTIVE_GRANT=%s\n' "$(printf '%s' "$active" | shell_quote)"
+    printf 'export DKEY_MANAGED_VARS=%s\n' "$(printf '%s' "$managed" | shell_quote)"
+}
+
 emit_exports_for_all_keys() {
     keys_plain="$(decrypt_keys)"
     managed=""
@@ -343,20 +389,20 @@ emit_exports_for_all_keys() {
 
 shell_on_cmd() {
     [ "${DKEY_EMIT_SHELL:-}" = "1" ] || fail "dkey on requires dot shell integration; run '. ~/.agents/.dotpanel/env.sh' first"
-    grant=""
+    grants=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --with)
                 shift
                 [ "$#" -gt 0 ] || fail "--with requires a grant"
-                grant="$1"
+                grants="${grants:-}${grants:+ }$1"
                 ;;
             *) fail "unknown shell on argument: $1" ;;
         esac
         shift
     done
-    if [ -n "$grant" ]; then
-        emit_exports_for_grant "$grant"
+    if [ -n "$grants" ]; then
+        emit_exports_for_grants "$grants"
     else
         emit_exports_for_all_keys
     fi
@@ -376,13 +422,13 @@ EOF
 }
 
 run_cmd() {
-    grant=""
+    grants=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --with)
                 shift
                 [ "$#" -gt 0 ] || fail "--with requires a grant"
-                grant="$1"
+                grants="${grants:-}${grants:+ }$1"
                 ;;
             --)
                 shift
@@ -392,10 +438,10 @@ run_cmd() {
         esac
         shift
     done
-    [ -n "$grant" ] || fail "run requires --with GRANT"
+    [ -n "$grants" ] || fail "run requires --with GRANT"
     [ "$#" -gt 0 ] || fail "run requires a command after --"
 
-    env_script="$(emit_exports_for_grant "$grant")"
+    env_script="$(emit_exports_for_grants "$grants")"
     # Apply only in this process, then exec target.
     eval "$env_script"
     exec "$@"
@@ -414,6 +460,7 @@ doctor_cmd() {
     problems=0
     command -v age >/dev/null 2>&1 && info "age found" || { warn "age missing"; problems=$((problems + 1)); }
     command -v age-keygen >/dev/null 2>&1 && info "age-keygen found" || { warn "age-keygen missing"; problems=$((problems + 1)); }
+    command -v jq >/dev/null 2>&1 && info "jq found" || { warn "jq missing"; problems=$((problems + 1)); }
     [ -f "$AGE_IDENTITY_FILE" ] && info "age identity exists: $AGE_IDENTITY_FILE" || warn "age identity missing: $AGE_IDENTITY_FILE"
     [ -f "$KEYS_FILE" ] && info "keys file exists: $KEYS_FILE" || warn "keys file missing: $KEYS_FILE"
     [ -f "$GRANTS_FILE" ] && info "grants file exists: $GRANTS_FILE" || warn "grants file missing: $GRANTS_FILE"

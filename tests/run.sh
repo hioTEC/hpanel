@@ -13,6 +13,7 @@ sh -n "$ROOT/bin/dot"
 sh -n "$ROOT/bin/dkey"
 bash -n "$ROOT/bin/dot"
 bash -n "$ROOT/bin/dkey"
+command -v jq >/dev/null 2>&1
 
 sh "$HOME/.agents/.dotpanel/bin/dot" init --yes
 "$HOME/.agents/.dotpanel/bin/dot" doctor
@@ -48,11 +49,24 @@ if command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1; then
   printf 'TEST_SECRET=ok\n' > "$HOME/.agents/secrets/keys.env"
   recipient="$(age-keygen -y "$HOME/.config/age/key.txt")"
   age -r "$recipient" -o "$HOME/.agents/secrets/keys.env.age" "$HOME/.agents/secrets/keys.env"
-  printf 'grant:test:TEST_VALUE=TEST_SECRET\n' > "$HOME/.agents/secrets/dkey.conf"
+  "$HOME/.agents/.dotpanel/bin/dkey" set OTHER_SECRET fine
+  printf 'grant:test:TEST_VALUE=TEST_SECRET\ngrant:other:OTHER_VALUE=OTHER_SECRET\n' > "$HOME/.agents/secrets/dkey.conf"
   dkey on --with test
   test "${TEST_VALUE:-}" = "ok"
   dkey off
   test -z "${TEST_VALUE:-}"
+  dkey on --with test --with other
+  test "${TEST_VALUE:-}" = "ok"
+  test "${OTHER_VALUE:-}" = "fine"
+  case "${DKEY_ACTIVE_GRANT:-}" in
+    test,other) ;;
+    *) exit 1 ;;
+  esac
+  dkey off
+  test -z "${TEST_VALUE:-}"
+  test -z "${OTHER_VALUE:-}"
+  run_out="$("$HOME/.agents/.dotpanel/bin/dkey" run --with test --with other -- sh -c 'printf "%s:%s:%s" "$TEST_VALUE" "$OTHER_VALUE" "$DKEY_ACTIVE_GRANT"')"
+  test "$run_out" = "ok:fine:test,other"
 fi
 
 echo "OK"

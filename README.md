@@ -2,27 +2,47 @@
 
 [中文版](README.zh-CN.md)
 
-`dotpanel` is a tiny shell toolkit for an agent memspace.
+`dotpanel` is the small public toolkit that makes an agent memspace usable on a
+machine. It installs two commands:
 
-Core invariant:
+- `dot` keeps `~/.agents` wired into Claude, Codex, and Kimi harnesses.
+- `dkey` stores encrypted environment secrets and injects them only when asked.
+
+It does not define your private rules, projects, memories, or infrastructure.
+Those live in your own memspace repo at `~/.agents`.
+
+## Mental Model
 
 ```text
-~/.agents/ is your memspace.
-~/.agents/AGENTS.md is the entry.
-~/.agents/.dotpanel/ is managed tooling and must be gitignored.
+~/.agents/            your private memspace repo
+~/.agents/AGENTS.md   the entry file agents read first
+~/.agents/.dotpanel/  this public toolkit checkout, ignored by git
 ```
 
-The repo provides a minimal `AGENTS.md` template and the small tools needed to
-install/sync a memspace. It does not proactively create the optional memspace
-folders; agents and users can grow them naturally when they have memory to
-store.
-
-- `dot` — sync and render helper for the memspace.
-- `dkey` — age-backed capability grants for short-lived CLI secret injection.
+`dotpanel` is intentionally small. It provides bootstrap, rendering, sync
+helpers, and secret injection. Your memspace decides what the agent should know.
 
 ## Install
 
-Fresh machine:
+Dependencies:
+
+- `git`
+- `age` and `age-keygen`
+- `jq`
+
+Debian/Ubuntu:
+
+```bash
+sudo apt-get install -y git age jq
+```
+
+macOS:
+
+```bash
+brew install git age jq
+```
+
+Fresh machine without an existing memspace:
 
 ```bash
 mkdir -p ~/.agents
@@ -30,58 +50,40 @@ git clone https://github.com/hioTEC/dotpanel.git ~/.agents/.dotpanel
 sh ~/.agents/.dotpanel/bin/dot init
 ```
 
-Existing memspace repo:
+Machine with an existing memspace repo:
 
 ```bash
 git clone <your-agents-repo> ~/.agents
 git clone https://github.com/hioTEC/dotpanel.git ~/.agents/.dotpanel
-sh ~/.agents/.dotpanel/bin/dot init
+sh ~/.agents/.dotpanel/bin/dot init --no-entry
 ```
 
-`dot init` creates `AGENTS.md` only when requested/accepted, configures harness
-entry files, and installs `dot` / `dkey` into `~/.local/bin`. The current
-already-open shell may need:
+`dot init` installs `dot` and `dkey` into `~/.local/bin`, writes shell
+integration, and renders the harness entry files. For an already-open shell:
 
 ```bash
 . ~/.agents/.dotpanel/env.sh
 ```
 
-## Commands
+## Everyday Commands
 
-```text
-dot init [--template|--blank|--from PATH|--no-entry] [--yes] [--no-path]
-dot set -a|--all
-dot set claude|codex|kimi
-dot configure [--harness all|claude|codex|kimi]
-dot doctor
-dot path
-dot sync status|diff|pull|push
-dot self status|update
-```
-
-`dot configure` is the long internal form. Humans usually use `dot set`.
-
-### Daily workflow
-
-Use `dot set` after editing `~/.agents/AGENTS.md` or after pulling memspace
-changes:
+Render harness entry files after editing `~/.agents/AGENTS.md`:
 
 ```bash
-dot set -a        # render Claude, Codex, and Kimi entries
-dot set claude    # render only ~/.claude/CLAUDE.md
-dot set codex     # render only ~/.codex/AGENTS.md
-dot set kimi      # render only ~/.kimi/AGENTS.md
+dot set -a
+dot set claude
+dot set codex
+dot set kimi
 ```
 
-The rendered harness entry is intentionally minimal:
+Check local wiring:
 
-```text
-`~/.agents/` is your memspace. `~/.agents/AGENTS.md` is the entry.
+```bash
+dot doctor
+dkey doctor
 ```
 
-No recursive scan, no hidden overlay, no private bridge.
-
-Use `dot sync` to move the memspace itself across machines:
+Sync the private memspace repo:
 
 ```bash
 dot sync status
@@ -90,91 +92,76 @@ dot sync pull
 dot sync push "sync memspace"
 ```
 
-`dot sync pull` runs `git pull --ff-only` in `~/.agents`, then runs
-`dot set -a`. `dot sync push` stages all `~/.agents` changes, creates a commit
-when needed, and pushes.
+Update this public toolkit checkout:
 
-### Script assumptions
+```bash
+dot self status
+dot self update
+```
 
-- `dot init` is a bootstrap command. The install script normally runs it once;
-  people should not need it day to day.
-- `~/.agents` is the user-owned memspace repo. `~/.agents/.dotpanel` is the
-  managed dotpanel checkout and is ignored by the memspace repo.
-- `dot` and `dkey` are symlinked into `~/.local/bin`.
-- The shell loads `~/.agents/.dotpanel/env.sh`; already-open shells may need
-  `. ~/.agents/.dotpanel/env.sh`.
-- `dot sync` assumes `~/.agents` is a git repo with a configured remote.
-- `dot sync pull` only accepts fast-forward pulls.
-- `dot sync push` intentionally commits every tracked/untracked memspace change
-  under `~/.agents`, except ignored files such as `.dotpanel/`.
+## What `dot` Does
 
-## Templates
+`dot` manages machine wiring around the memspace:
 
-Tracked templates live in `templates/`:
+- `dot init` bootstraps shell integration and symlinks commands.
+- `dot set` renders minimal harness entry files from `~/.agents/AGENTS.md`.
+- `dot sync` runs git operations in `~/.agents`.
+- `dot self` runs git operations in `~/.agents/.dotpanel`.
+- `dot doctor` checks that the local setup is coherent.
 
-- `templates/AGENTS.md` — minimal memspace entry scaffold.
-- `templates/secrets/dkey.conf` — starter grant map.
-- `templates/secrets/keys.env.template` — starter plaintext env template.
+Rendered harness entries are deliberately tiny. They tell the harness to read
+`~/.agents/AGENTS.md`; they do not duplicate your private rules.
 
-`dot init --template` copies only the entry scaffold. `dkey init` creates only
-`secrets/` files needed for dkey; it does not create the rest of the memspace
-layout.
+## What `dkey` Does
 
-## dkey
+`dkey` stores secret values encrypted with age:
 
-```text
-dkey init
+```bash
 dkey keygen
 dkey set NAME VALUE
 dkey set NAME=VALUE
-dkey edit
-dkey list
-dkey status
-dkey doctor
-dkey run --with GRANT -- COMMAND
-dkey on [--with GRANT]
-dkey off
-```
-
-`dkey` is for privileged CLI capability grants, not routine LLM backend setup.
-It decrypts only when a grant is used and injects only the selected environment
-variables into the target process or current shell.
-
-First-time secret setup:
-
-```bash
-dkey keygen
-dkey set OPENAI_API_KEY sk-...
-dkey set ANTHROPIC_API_KEY sk-ant-...
 dkey list
 ```
 
-`dkey keygen` creates the local age identity at `~/.config/age/key.txt` when it
-does not already exist. `dkey set` creates or overwrites a named encrypted key
-inside `~/.agents/secrets/keys.env.age`; setting the same name again replaces
-the old value.
-
-Current-shell env workflow:
+It can inject those secrets into one command:
 
 ```bash
-dkey on
-dkey status
-dkey off
+dkey run --with GRANT -- command arg1 arg2
 ```
 
-`dkey on` exports all encrypted keys into the current shell. `dkey off` unsets
-every variable that `dkey on` set. These commands affect the current shell only
-after `dot init` has installed the shell function from
-`~/.agents/.dotpanel/env.sh`; direct `dkey on` refuses to print secret-bearing
-shell code.
-
-Grant workflow remains available for narrower command execution:
+Or into the current shell when shell integration is loaded:
 
 ```bash
-dkey run --with GRANT -- COMMAND
 dkey on --with GRANT
+dkey status
 dkey off
 ```
 
-Subagents must not invoke `dkey` or wrappers known to use it. Resource-affecting
-credential use stays with the main agent.
+`dkey on` changes only the current shell. Direct `command dkey on` refuses to
+print secret-bearing shell code; use the shell function installed by `dot init`.
+
+## Files Created
+
+`dot init` may create or update:
+
+- `~/.local/bin/dot`
+- `~/.local/bin/dkey`
+- `~/.agents/.dotpanel/env.sh`
+- `~/.claude/CLAUDE.md`
+- `~/.codex/AGENTS.md`
+- `~/.kimi/AGENTS.md`
+
+`dkey init` may create:
+
+- `~/.agents/secrets/dkey.conf`
+- `~/.agents/secrets/keys.env.template`
+- `~/.agents/secrets/keys.env.age`
+
+## Boundaries
+
+- `~/.agents` is user-owned and private.
+- `~/.agents/.dotpanel` is the managed public checkout and should be ignored by
+  the memspace repo.
+- `dot sync push` stages all non-ignored changes under `~/.agents`.
+- `dkey` is privileged; do not use it from subagents or scripts that should not
+  see secrets.

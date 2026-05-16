@@ -2,24 +2,47 @@
 
 [English](README.md)
 
-`dotpanel` 是一个很小的 shell toolkit，用来管理 agent memspace。
+`dotpanel` 是一个公开的小工具集，用来把 agent memspace 接到当前机器上。
+它安装两个命令：
 
-核心不变量：
+- `dot` 负责把 `~/.agents` 接到 Claude、Codex、Kimi 等 harness。
+- `dkey` 负责加密保存环境变量 secret，并在明确请求时注入。
+
+它不定义你的私有规则、项目、记忆或基础设施。这些内容都属于你自己的
+`~/.agents` repo。
+
+## 心智模型
 
 ```text
-~/.agents/ 是你的 memspace。
-~/.agents/AGENTS.md 是入口文件。
-~/.agents/.dotpanel/ 是受管理的 tooling，必须被 gitignore。
+~/.agents/            你的私有 memspace repo
+~/.agents/AGENTS.md   agent 首先读取的入口文件
+~/.agents/.dotpanel/  这个公开工具 checkout，被 git 忽略
 ```
 
-这个 repo 提供一个最小 `AGENTS.md` 模板，以及安装/同步 memspace 需要的小工具。它不会主动创建所有可选的 memspace 目录；agent 和用户可以在真正需要保存 memory 时自然增长这些目录。
+`dotpanel` 故意保持很小：bootstrap、render、sync helper、secret injection。
+agent 应该知道什么，由你的 memspace 决定。
 
-- `dot` — memspace 的 sync/render helper。
-- `dkey` — 基于 age 的 capability grants，用于短时 CLI secret 注入。
+## 安装
 
-## Install
+依赖：
 
-新机器：
+- `git`
+- `age` 和 `age-keygen`
+- `jq`
+
+Debian/Ubuntu:
+
+```bash
+sudo apt-get install -y git age jq
+```
+
+macOS:
+
+```bash
+brew install git age jq
+```
+
+没有现成 memspace 的新机器：
 
 ```bash
 mkdir -p ~/.agents
@@ -27,55 +50,40 @@ git clone https://github.com/hioTEC/dotpanel.git ~/.agents/.dotpanel
 sh ~/.agents/.dotpanel/bin/dot init
 ```
 
-已有 memspace repo：
+已有 memspace repo 的机器：
 
 ```bash
 git clone <your-agents-repo> ~/.agents
 git clone https://github.com/hioTEC/dotpanel.git ~/.agents/.dotpanel
-sh ~/.agents/.dotpanel/bin/dot init
+sh ~/.agents/.dotpanel/bin/dot init --no-entry
 ```
 
-`dot init` 只在用户选择/显式请求时创建 `AGENTS.md`，同时配置 harness entry files，并把 `dot` / `dkey` 安装到 `~/.local/bin`。已经打开的 shell 可能需要：
+`dot init` 会把 `dot` 和 `dkey` 安装到 `~/.local/bin`，写入 shell
+integration，并渲染 harness entry files。当前已经打开的 shell 需要手动加载：
 
 ```bash
 . ~/.agents/.dotpanel/env.sh
 ```
 
-## Commands
+## 日常命令
 
-```text
-dot init [--template|--blank|--from PATH|--no-entry] [--yes] [--no-path]
-dot set -a|--all
-dot set claude|codex|kimi
-dot configure [--harness all|claude|codex|kimi]
-dot doctor
-dot path
-dot sync status|diff|pull|push
-dot self status|update
-```
-
-`dot configure` 是较长的内部形式。人日常使用通常用 `dot set`。
-
-### Daily Workflow
-
-编辑 `~/.agents/AGENTS.md` 后，或者 pull 了 memspace 变更后，使用 `dot set`：
+编辑 `~/.agents/AGENTS.md` 后重新渲染 harness entry：
 
 ```bash
-dot set -a        # 渲染 Claude、Codex、Kimi entries
-dot set claude    # 只渲染 ~/.claude/CLAUDE.md
-dot set codex     # 只渲染 ~/.codex/AGENTS.md
-dot set kimi      # 只渲染 ~/.kimi/AGENTS.md
+dot set -a
+dot set claude
+dot set codex
+dot set kimi
 ```
 
-渲染出来的 harness entry 故意保持最小：
+检查本机 wiring：
 
-```text
-`~/.agents/` is your memspace. `~/.agents/AGENTS.md` is the entry.
+```bash
+dot doctor
+dkey doctor
 ```
 
-没有 recursive scan，没有 hidden overlay，也没有 private bridge。
-
-用 `dot sync` 在多台机器之间同步 memspace 本身：
+同步私有 memspace repo：
 
 ```bash
 dot sync status
@@ -84,73 +92,74 @@ dot sync pull
 dot sync push "sync memspace"
 ```
 
-`dot sync pull` 会在 `~/.agents` 里执行 `git pull --ff-only`，然后运行 `dot set -a`。`dot sync push` 会 stage 所有 `~/.agents` 变更，在需要时创建 commit，然后 push。
+更新这个公开工具 checkout：
 
-### Script Assumptions
+```bash
+dot self status
+dot self update
+```
 
-- `dot init` 是 bootstrap 命令。安装脚本通常第一次运行它；日常不需要人手动跑。
-- `~/.agents` 是用户自己的 memspace repo。`~/.agents/.dotpanel` 是受管理的 dotpanel checkout，并被 memspace repo ignore。
-- `dot` 和 `dkey` 会 symlink 到 `~/.local/bin`。
-- shell 会加载 `~/.agents/.dotpanel/env.sh`；已经打开的 shell 可能需要 `. ~/.agents/.dotpanel/env.sh`。
-- `dot sync` 假设 `~/.agents` 是 git repo，并且 remote 已配置好。
-- `dot sync pull` 只接受 fast-forward pull。
-- `dot sync push` 会有意 commit `~/.agents` 下所有 tracked/untracked memspace 变更，忽略 `.dotpanel/` 这类 ignored 文件。
+## `dot` 做什么
 
-## Templates
+`dot` 管的是 memspace 在本机的 wiring：
 
-tracked templates 位于 `templates/`：
+- `dot init` 初始化 shell integration 和命令 symlink。
+- `dot set` 从 `~/.agents/AGENTS.md` 渲染最小 harness entry。
+- `dot sync` 在 `~/.agents` 里执行 git 同步。
+- `dot self` 在 `~/.agents/.dotpanel` 里执行 git 同步。
+- `dot doctor` 检查本机配置是否一致。
 
-- `templates/AGENTS.md` — 最小 memspace entry scaffold。
-- `templates/secrets/dkey.conf` — grant map starter。
-- `templates/secrets/keys.env.template` — plaintext env starter template。
+渲染出来的 harness entry 故意很小。它们只告诉 harness 去读
+`~/.agents/AGENTS.md`，不会复制你的私有规则。
 
-`dot init --template` 只复制 entry scaffold。`dkey init` 只创建 `dkey` 需要的 `secrets/` 文件，不会创建 memspace 的其他目录。
+## `dkey` 做什么
 
-## dkey
+`dkey` 用 age 加密保存 secret：
 
-```text
-dkey init
+```bash
 dkey keygen
 dkey set NAME VALUE
 dkey set NAME=VALUE
-dkey edit
-dkey list
-dkey status
-dkey doctor
-dkey run --with GRANT -- COMMAND
-dkey on [--with GRANT]
-dkey off
-```
-
-`dkey` 用于 privileged CLI capability grants，不是 routine LLM backend setup。它只在 grant 被使用时解密，并且只把选中的 environment variables 注入到目标进程或当前 shell。
-
-首次 secret setup：
-
-```bash
-dkey keygen
-dkey set OPENAI_API_KEY sk-...
-dkey set ANTHROPIC_API_KEY sk-ant-...
 dkey list
 ```
 
-`dkey keygen` 会在 `~/.config/age/key.txt` 不存在时创建本地 age identity。`dkey set` 会在 `~/.agents/secrets/keys.env.age` 里创建或覆盖一个 encrypted key；设置同名 key 会替换旧值。
-
-当前 shell env workflow：
+把 secret 只注入到一次命令：
 
 ```bash
-dkey on
-dkey status
-dkey off
+dkey run --with GRANT -- command arg1 arg2
 ```
 
-`dkey on` 会把所有 encrypted keys export 到当前 shell。`dkey off` 会 unset 所有由 `dkey on` 设置的变量。这些命令只有在 `dot init` 已安装来自 `~/.agents/.dotpanel/env.sh` 的 shell function 后，才会影响当前 shell；直接运行 `dkey on` 会拒绝打印含 secret 的 shell code。
-
-更窄的 grant workflow 仍然可用：
+或者在 shell integration 已加载时注入到当前 shell：
 
 ```bash
-dkey run --with GRANT -- COMMAND
 dkey on --with GRANT
+dkey status
 dkey off
 ```
 
-Subagents 不得调用 `dkey` 或已知会使用它的 wrapper。影响外部资源的 credential 使用留在 main agent；scoped grants 优先，但不是强制。
+`dkey on` 只影响当前 shell。直接运行 `command dkey on` 会拒绝输出含 secret
+的 shell code；要使用 `dot init` 安装的 shell function。
+
+## 创建的文件
+
+`dot init` 可能创建或更新：
+
+- `~/.local/bin/dot`
+- `~/.local/bin/dkey`
+- `~/.agents/.dotpanel/env.sh`
+- `~/.claude/CLAUDE.md`
+- `~/.codex/AGENTS.md`
+- `~/.kimi/AGENTS.md`
+
+`dkey init` 可能创建：
+
+- `~/.agents/secrets/dkey.conf`
+- `~/.agents/secrets/keys.env.template`
+- `~/.agents/secrets/keys.env.age`
+
+## 边界
+
+- `~/.agents` 是用户私有 repo。
+- `~/.agents/.dotpanel` 是受管理的公开 checkout，应该被 memspace repo 忽略。
+- `dot sync push` 会 stage `~/.agents` 下所有未被 ignore 的变更。
+- `dkey` 是 privileged 工具；subagent 或不该看到 secret 的脚本不要调用它。

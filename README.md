@@ -35,8 +35,8 @@ dot init
 ### dpkg (Debian / Ubuntu)
 
 ```bash
-curl -LO https://github.com/hioTEC/dotpanel/releases/latest/download/dotpanel_0.1.0-1_all.deb
-sudo dpkg -i dotpanel_0.1.0-1_all.deb
+curl -LO https://github.com/hioTEC/dotpanel/releases/latest/download/dotpanel_latest_all.deb
+sudo dpkg -i dotpanel_latest_all.deb
 dot init
 ```
 

@@ -24,6 +24,24 @@ agent 应该知道什么，由你的 memspace 决定。
 
 ## 安装
 
+### Homebrew（macOS / Linux）
+
+```bash
+brew tap hioTEC/dotpanel
+brew install dotpanel
+dot init
+```
+
+### dpkg（Debian / Ubuntu）
+
+```bash
+curl -LO https://github.com/hioTEC/dotpanel/releases/latest/download/dotpanel_0.1.0-1_all.deb
+sudo dpkg -i dotpanel_0.1.0-1_all.deb
+dot init
+```
+
+### 从源码安装（所有平台）
+
 依赖：
 
 - `git`

@@ -27,7 +27,7 @@ helpers, and secret injection. Your memspace decides what the agent should know.
 Dependencies:
 
 - `git`
-- `age` and `age-keygen`
+- `age` and `age-keygen` (from the `age` package)
 - `jq`
 
 Debian/Ubuntu:
@@ -112,6 +112,14 @@ dot sync pull
 dot sync push "sync memspace"
 ```
 
+Switch harness backends (reads `~/.agents/secrets/dkey.providers.json`):
+
+```bash
+dkey use claude:deepseek
+dkey use codex:qwen:payg-global
+dkey use all:deepseek
+```
+
 Update this public toolkit checkout:
 
 ```bash
@@ -160,6 +168,18 @@ dkey off
 `dkey on` changes only the current shell. Direct `command dkey on` refuses to
 print secret-bearing shell code; use the shell function installed by `dot init`.
 
+`dkey use` writes harness backend settings from a provider registry:
+
+```bash
+dkey use claude:deepseek       # switch Claude Code to a backend
+dkey use codex:qwen:payg-global # switch Codex to a backend
+dkey use all:deepseek           # switch both
+```
+
+The provider registry lives at `~/.agents/secrets/dkey.providers.json`.
+See [PROVIDERS.md](PROVIDERS.md) for the full schema and a template at
+`templates/secrets/dkey.providers.example.json`.
+
 ## Files Created
 
 `dot init` may create or update:
@@ -183,3 +203,9 @@ print secret-bearing shell code; use the shell function installed by `dot init`.
 - `dot sync push` stages all non-ignored changes under `~/.agents`.
 - `dkey` is privileged; do not use it from subagents or scripts that should not
   see secrets.
+
+## See Also
+
+- [CHANGELOG.md](CHANGELOG.md)
+- [PROVIDERS.md](PROVIDERS.md) — provider registry schema
+- [LICENSE](LICENSE)

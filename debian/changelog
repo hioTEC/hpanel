@@ -1,0 +1,8 @@
+dotpanel (0.1.0-1) resolute; urgency=medium
+
+  * Initial packaging.
+  * Move backend switching to dkey use.
+  * Add shell aliases claw and codx.
+  * Support git bash path setup and identity import.
+
+ -- hioTEC <dev@hiotec.com>  Sat, 16 May 2026 12:00:00 +0800

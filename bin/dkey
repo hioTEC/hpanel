@@ -884,6 +884,20 @@ doctor_cmd() {
     [ -f "$AGE_IDENTITY_FILE" ] && info "age identity exists: $AGE_IDENTITY_FILE" || warn "age identity missing: $AGE_IDENTITY_FILE"
     [ -f "$KEYS_FILE" ] && info "keys file exists: $KEYS_FILE" || warn "keys file missing: $KEYS_FILE"
     [ -f "$GRANTS_FILE" ] && info "grants file exists: $GRANTS_FILE" || warn "grants file missing: $GRANTS_FILE"
+    if [ -f "$PROVIDERS_FILE" ]; then
+        if command -v jq >/dev/null 2>&1; then
+            if jq -e '.version and .defaults and .providers' "$PROVIDERS_FILE" >/dev/null 2>&1; then
+                info "providers registry valid: $PROVIDERS_FILE"
+            else
+                warn "providers registry invalid (missing version/defaults/providers): $PROVIDERS_FILE"
+                problems=$((problems + 1))
+            fi
+        else
+            info "providers registry exists: $PROVIDERS_FILE"
+        fi
+    else
+        warn "providers registry missing: $PROVIDERS_FILE"
+    fi
     [ "$problems" -eq 0 ] || return 2
 }
 

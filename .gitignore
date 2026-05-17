@@ -3,3 +3,10 @@
 tmp/
 env.sh
 var/
+
+# Debian packaging artifacts
+debian/dotpanel/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/*.debhelper

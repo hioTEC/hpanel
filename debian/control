@@ -1,0 +1,22 @@
+Source: dotpanel
+Section: utils
+Priority: optional
+Maintainer: hioTEC <dev@hiotec.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: dotpanel
+Architecture: all
+Depends: git, age, jq, ${misc:Depends}
+Description: Agent memspace bootstrap and secret injection tools
+ dotpanel installs two commands — dot and dkey — that wire an
+ agent memspace (~/.agents) into Claude, Codex, and Kimi harnesses:
+ .
+  * dot manages harness entry rendering, PATH wiring, and memspace
+    repo sync.
+  * dkey stores encrypted environment secrets (age) and injects them
+    via grant scopes or whole-environment export.
+ .
+ Backend switching (dkey use) writes Claude Code settings and Codex
+ config from a provider registry.

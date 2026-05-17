@@ -58,7 +58,7 @@ git clone https://github.com/hioTEC/dotpanel.git ~/.agents/.dotpanel
 sh ~/.agents/.dotpanel/bin/dot init --no-entry
 ```
 
-`dot init` 会把 `dot` 和 `dkey` 安装到 `~/.local/bin`，写入 shell
+`dot init` 把 `dot` 和 `dkey` 所在目录加入 PATH（通过 `env.sh`），写入 shell
 integration，并渲染 harness entry files。当前已经打开的 shell 需要手动加载：
 
 ```bash
@@ -118,11 +118,19 @@ dot self status
 dot self update
 ```
 
+切换 harness backend（读取 `~/.agents/secrets/dkey.providers.json`）：
+
+```bash
+dkey use claude:deepseek
+dkey use codex:qwen:payg-global
+dkey use all:deepseek
+```
+
 ## `dot` 做什么
 
 `dot` 管的是 memspace 在本机的 wiring：
 
-- `dot init` 初始化 shell integration 和命令 symlink。
+- `dot init` 初始化 shell integration 和 PATH wiring。
 - `dot set` 从 `~/.agents/AGENTS.md` 渲染最小 harness entry。
 - `dot sync` 在 `~/.agents` 里执行 git 同步。
 - `dot self` 在 `~/.agents/.dotpanel` 里执行 git 同步。
@@ -159,12 +167,22 @@ dkey off
 `dkey on` 只影响当前 shell。直接运行 `command dkey on` 会拒绝输出含 secret
 的 shell code；要使用 `dot init` 安装的 shell function。
 
+`dkey use` 从 provider registry 写入 harness backend 配置：
+
+```bash
+dkey use claude:deepseek       # 把 Claude Code 切到某个 backend
+dkey use codex:qwen:payg-global # 把 Codex 切到某个 backend
+dkey use all:deepseek           # 同时切换
+```
+
+Provider registry 位于 `~/.agents/secrets/dkey.providers.json`。
+参见 [PROVIDERS.md](PROVIDERS.md) 了解完整 schema，模板在
+`templates/secrets/dkey.providers.example.json`。
+
 ## 创建的文件
 
 `dot init` 可能创建或更新：
 
-- `~/.local/bin/dot`
-- `~/.local/bin/dkey`
 - `~/.agents/.dotpanel/env.sh`
 - `~/.claude/CLAUDE.md`
 - `~/.codex/AGENTS.md`
@@ -182,3 +200,9 @@ dkey off
 - `~/.agents/.dotpanel` 是受管理的公开 checkout，应该被 memspace repo 忽略。
 - `dot sync push` 会 stage `~/.agents` 下所有未被 ignore 的变更。
 - `dkey` 是 privileged 工具；subagent 或不该看到 secret 的脚本不要调用它。
+
+## 参见
+
+- [CHANGELOG.md](CHANGELOG.md)
+- [PROVIDERS.md](PROVIDERS.md) — provider registry schema
+- [LICENSE](LICENSE)

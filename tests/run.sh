@@ -20,8 +20,10 @@ sh "$HOME/.agents/.dotpanel/bin/dot" init --yes
 "$HOME/.agents/.dotpanel/bin/dot" set -a
 
 grep -qxF '/.dotpanel/' "$HOME/.agents/.gitignore"
-test -L "$HOME/.local/bin/dot"
-test -L "$HOME/.local/bin/dkey"
+. "$HOME/.agents/.dotpanel/env.sh"
+test "$(command -v dot)" = "$HOME/.agents/.dotpanel/bin/dot"
+type dkey | grep -q 'dkey is a function'
+test -x "$HOME/.agents/.dotpanel/bin/dkey"
 test -f "$HOME/.claude/CLAUDE.md"
 test -f "$HOME/.codex/AGENTS.md"
 test -f "$HOME/.kimi/AGENTS.md"
@@ -151,21 +153,28 @@ if command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1; then
   }
 }
 JSON
-  "$HOME/.agents/.dotpanel/bin/dot" use codex:ok
+  "$HOME/.agents/.dotpanel/bin/dkey" use codex:ok
   grep -q 'model_provider = "ok"' "$HOME/.codex/config.toml"
   grep -q 'wire_api = "responses"' "$HOME/.codex/config.toml"
   jq -e '.auth_mode == "apikey" and .OPENAI_API_KEY == "ok"' "$HOME/.codex/auth.json" >/dev/null
-  "$HOME/.agents/.dotpanel/bin/dot" use all:blocked 2> "$TMP/dot-use-blocked.err"
-  grep -q 'blocked for test' "$TMP/dot-use-blocked.err"
+  "$HOME/.agents/.dotpanel/bin/dkey" use all:blocked 2> "$TMP/dkey-use-blocked.err"
+  grep -q 'blocked for test' "$TMP/dkey-use-blocked.err"
   jq -e '.env.ANTHROPIC_BASE_URL == "https://blocked.test/anthropic"' "$HOME/.claude/settings.json" >/dev/null
-  if "$HOME/.agents/.dotpanel/bin/dot" use codex:blocked 2> "$TMP/dot-use-blocked-strict.err"; then
+  if "$HOME/.agents/.dotpanel/bin/dkey" use codex:blocked 2> "$TMP/dkey-use-blocked-strict.err"; then
     exit 1
   fi
-  grep -q 'blocked for test' "$TMP/dot-use-blocked-strict.err"
-  if "$HOME/.agents/.dotpanel/bin/dot" use ok --harness codex 2> "$TMP/dot-use-old-syntax.err"; then
+  grep -q 'blocked for test' "$TMP/dkey-use-blocked-strict.err"
+  if "$HOME/.agents/.dotpanel/bin/dot" use codex:ok 2> "$TMP/dot-use-removed.err"; then
     exit 1
   fi
-  grep -q 'HARNESS:BACKEND' "$TMP/dot-use-old-syntax.err"
+  grep -q 'unknown command: use' "$TMP/dot-use-removed.err"
+  "$HOME/.agents/.dotpanel/bin/dkey" doctor > "$TMP/dkey-doctor.out" 2>&1
+  grep -q 'providers registry valid' "$TMP/dkey-doctor.out"
+  echo '{"bad": "json"}' > "$HOME/.agents/secrets/dkey.providers.json"
+  if "$HOME/.agents/.dotpanel/bin/dkey" doctor > "$TMP/dkey-doctor-invalid.out" 2>&1; then
+    exit 1
+  fi
+  grep -q 'providers registry invalid' "$TMP/dkey-doctor-invalid.out"
 fi
 
 echo "OK"

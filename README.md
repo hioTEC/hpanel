@@ -212,6 +212,7 @@ See [PROVIDERS.md](PROVIDERS.md) for the full schema and a template at
 - `~/.agents/secrets/dkey.conf`
 - `~/.agents/secrets/keys.env.template`
 - `~/.agents/secrets/keys.env.age`
+- `~/.agents/secrets/dkey.providers.json`
 
 ## Boundaries
 

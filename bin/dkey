@@ -281,6 +281,17 @@ init_cmd() {
     else
         info "current $KEYS_FILE"
     fi
+    if [ ! -f "$PROVIDERS_FILE" ]; then
+        providers_template="$TEMPLATE_DIR/dkey.providers.example.json"
+        if [ -f "$providers_template" ]; then
+            cp "$providers_template" "$PROVIDERS_FILE"
+            info "created $PROVIDERS_FILE"
+        else
+            warn "providers template not found at $providers_template"
+        fi
+    else
+        info "current $PROVIDERS_FILE"
+    fi
 }
 
 edit_cmd() {

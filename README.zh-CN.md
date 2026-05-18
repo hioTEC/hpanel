@@ -211,6 +211,7 @@ Provider registry 位于 `~/.agents/secrets/dkey.providers.json`。
 - `~/.agents/secrets/dkey.conf`
 - `~/.agents/secrets/keys.env.template`
 - `~/.agents/secrets/keys.env.age`
+- `~/.agents/secrets/dkey.providers.json`
 
 ## 边界
 

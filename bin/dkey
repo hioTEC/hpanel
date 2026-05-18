@@ -280,6 +280,9 @@ init_cmd() {
         fi
     else
         info "current $KEYS_FILE"
+        if [ ! -f "$AGE_IDENTITY_FILE" ]; then
+            warn "keys file exists but age identity not found; run: dkey identity import --stdin"
+        fi
     fi
     if [ ! -f "$PROVIDERS_FILE" ]; then
         providers_template="$TEMPLATE_DIR/dkey.providers.example.json"

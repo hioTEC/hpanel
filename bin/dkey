@@ -35,6 +35,7 @@ Usage:
   dkey use claude:BACKEND[:PROFILE]
   dkey use codex:BACKEND[:PROFILE]
   dkey use all:BACKEND[:PROFILE]
+  dkey reset claude|codex|all
   dkey status
   dkey doctor
   dkey run --with GRANT [--with GRANT...] -- COMMAND [ARGS...]
@@ -627,6 +628,51 @@ write_codex_use() {
     info "Codex backend: $provider:$profile"
 }
 
+reset_cmd() {
+    need_jq
+    harness="$1"
+    case "$harness" in
+        claude|codex|all) ;;
+        *) fail "reset requires: claude, codex, or all" ;;
+    esac
+
+    case "$harness" in
+        claude|all)
+            settings_path="$(expand_home_path "$(jq -r '.defaults.claude.settings_path // "~/.claude/settings.json"' "$PROVIDERS_FILE")")"
+            if [ -f "$settings_path" ]; then
+                mkdir -p "$(dirname "$settings_path")"
+                # Remove all managed Claude env keys
+                jq 'del(.env.ANTHROPIC_API_KEY, .env.ANTHROPIC_AUTH_TOKEN, .env.ANTHROPIC_BASE_URL, .env.ANTHROPIC_MODEL, .env.ANTHROPIC_DEFAULT_HAIKU_MODEL, .env.ANTHROPIC_DEFAULT_SONNET_MODEL, .env.ANTHROPIC_DEFAULT_OPUS_MODEL, .env.ANTHROPIC_SMALL_FAST_MODEL, .env.CLAUDE_CODE_SUBAGENT_MODEL, .env.API_TIMEOUT_MS, .env.CLAUDE_CODE_ATTRIBUTION_HEADER, .env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, .env.ENABLE_TOOL_SEARCH)' "$settings_path" > "$settings_path.tmp"
+                mv "$settings_path.tmp" "$settings_path"
+                info "reset Claude Code — custom backend env vars cleared"
+            fi
+            ;;
+    esac
+
+    case "$harness" in
+        codex|all)
+            config_path="$(expand_home_path "$(jq -r '.defaults.codex.config_path // "~/.codex/config.toml"' "$PROVIDERS_FILE")")"
+            if [ -f "$config_path" ]; then
+                mkdir -p "$(dirname "$config_path")" "$DOT_DIR/var"
+                tmp="$DOT_DIR/var/codex-reset.$$"
+                rest="$DOT_DIR/var/codex-reset-rest.$$"
+                # Remove model_provider, model, review_model and all [model_providers.*] sections
+                awk '
+                    BEGIN { in_provider_section = 0 }
+                    /^\[model_providers\./ { in_provider_section = 1; next }
+                    /^\[/ && in_provider_section { in_provider_section = 0 }
+                    in_provider_section { next }
+                    /^(model_provider|model|review_model)[[:space:]]*=/ { next }
+                    { print }
+                ' "$config_path" > "$rest"
+                cat "$rest" > "$config_path"
+                rm -f "$rest" "$tmp"
+                info "reset Codex — custom backend settings cleared"
+            fi
+            ;;
+    esac
+}
+
 use_cmd() {
     need_jq
     [ -f "$PROVIDERS_FILE" ] || fail "providers registry missing: $PROVIDERS_FILE"
@@ -940,6 +986,7 @@ case "$cmd" in
     edit) edit_cmd "$@" ;;
     list) list_cmd "$@" ;;
     use) use_cmd "$@" ;;
+    reset) reset_cmd "$@" ;;
     grants) grant_list_cmd "$@" ;;
     run) run_cmd "$@" ;;
     on) shell_on_cmd "$@" ;;

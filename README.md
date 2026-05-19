@@ -90,7 +90,7 @@ claw='claude --dangerously-skip-permissions'
 codx='codex --dangerously-bypass-approvals-and-sandbox'
 ```
 
-After updating dotpanel (`dot self update` or `dot path`), source again:
+After updating dotpanel (`dot self update` or `dot set path`), source again:
 
 ```bash
 . ~/.agents/.dotpanel/env.sh
@@ -100,7 +100,7 @@ If the aliases are still missing (`claw: command not found`), regenerate the env
 file first:
 
 ```bash
-dot path && . ~/.agents/.dotpanel/env.sh
+dot set path && . ~/.agents/.dotpanel/env.sh
 ```
 
 ## Everyday Commands

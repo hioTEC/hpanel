@@ -119,9 +119,16 @@ shell_rc_files() {
         printf '%s\n' "$DOT_SHELL_RC"
         return 0
     fi
-    printf '%s\n' "$HOME_DIR/.bashrc"
-    printf '%s\n' "$HOME_DIR/.bash_profile"
-    printf '%s\n' "$HOME_DIR/.profile"
+    case "$(basename -- "${SHELL:-}")" in
+        zsh)
+            printf '%s\n' "${ZDOTDIR:-$HOME_DIR}/.zshrc"
+            ;;
+        *)
+            printf '%s\n' "$HOME_DIR/.bashrc"
+            printf '%s\n' "$HOME_DIR/.bash_profile"
+            printf '%s\n' "$HOME_DIR/.profile"
+            ;;
+    esac
 }
 
 inject_shell_rc() {

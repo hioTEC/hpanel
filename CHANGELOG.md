@@ -9,6 +9,8 @@
   syntax.
 
 ### Added
+- `dkey grants` surfaced in `dkey help`/README, and now prints the env vars each
+  grant injects (never secret values); `grant not found` errors list available grants.
 - `dkey use` command: writes backend settings for Claude Code (`~/.claude/settings.json`,
   `~/.claude.json`) and Codex (`~/.codex/config.toml`, `~/.codex/auth.json`)
   from a provider registry at `~/.agents/secrets/dkey.providers.json`.
@@ -16,6 +18,10 @@
   for importing an existing age identity.
 - Shell aliases `claw` and `codx` for permission-free harness invocation
   (installed by `dot init` via `env.sh`).
+
+### Removed
+- Public apt/brew packaging (`debian/`, `homebrew/`) and their README install
+  sections — install from source.
 
 ### Fixed
 - jq 1.8.1 compatibility in `write_claude_use`.

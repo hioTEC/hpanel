@@ -32,6 +32,7 @@ Usage:
   dkey set NAME=VALUE
   dkey edit
   dkey list
+  dkey grants
   dkey use claude:BACKEND[:PROFILE]
   dkey use codex:BACKEND[:PROFILE]
   dkey use all:BACKEND[:PROFILE]
@@ -336,12 +337,28 @@ list_cmd() {
     ' | sort -u
 }
 
+grant_names_csv() {
+    [ -f "$GRANTS_FILE" ] || return 0
+    awk -F: '/^grant:/ { names = names (names == "" ? "" : ", ") $2 } END { if (names != "") print names }' "$GRANTS_FILE"
+}
+
 grant_list_cmd() {
     if [ ! -f "$GRANTS_FILE" ]; then
         warn "grants file missing: $GRANTS_FILE"
         return 0
     fi
-    awk -F: '/^grant:/ { print $2 }' "$GRANTS_FILE" | sort -u
+    # Name + the env vars each grant injects. Secret values are never shown.
+    awk -F: '
+        /^grant:/ {
+            n = split($3, pairs, ",")
+            envs = ""
+            for (i = 1; i <= n; i++) {
+                eq = index(pairs[i], "=")
+                if (eq > 0) envs = envs (envs == "" ? "" : ", ") substr(pairs[i], 1, eq - 1)
+            }
+            printf "%-16s %s\n", $2, envs
+        }
+    ' "$GRANTS_FILE" | sort
 }
 
 lookup_secret() {
@@ -758,7 +775,7 @@ use_cmd() {
 emit_exports_for_grant() {
     grant="$1"
     line="$(grant_line "$grant")"
-    [ -n "$line" ] || fail "grant not found: $grant"
+    [ -n "$line" ] || fail "grant not found: $grant (available: $(grant_names_csv))"
     mapping="${line#grant:${grant}:}"
     keys_plain="$(decrypt_keys)"
 
@@ -802,7 +819,7 @@ emit_exports_for_grants() {
 
     for grant in $grants; do
         line="$(grant_line "$grant")"
-        [ -n "$line" ] || fail "grant not found: $grant"
+        [ -n "$line" ] || fail "grant not found: $grant (available: $(grant_names_csv))"
         mapping="${line#grant:${grant}:}"
 
         old_ifs="$IFS"

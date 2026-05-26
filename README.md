@@ -58,8 +58,9 @@ git clone https://github.com/hioTEC/dotpanel.git ~/.agents/.dotpanel
 sh ~/.agents/.dotpanel/bin/dot init --no-entry
 ```
 
-`dot init` adds `~/.agents/.dotpanel/bin` to PATH through shell integration and
-renders the harness entry files. For an already-open shell:
+`dot init` adds `~/.agents/.dotpanel/bin` (dot, dkey) and `~/.agents/tools/bin`
+(claw/codx) to PATH through shell integration and renders the harness entry
+files. For an already-open shell:
 
 ```bash
 . ~/.agents/.dotpanel/env.sh

@@ -76,8 +76,9 @@ git clone https://github.com/hioTEC/dotpanel.git ~/.agents/.dotpanel
 sh ~/.agents/.dotpanel/bin/dot init --no-entry
 ```
 
-`dot init` 把 `dot` 和 `dkey` 所在目录加入 PATH（通过 `env.sh`），写入 shell
-integration，并渲染 harness entry files。当前已经打开的 shell 需要手动加载：
+`dot init` 把 `dot`/`dkey` 所在目录（`~/.agents/.dotpanel/bin`）和 `~/.agents/tools/bin`
+（claw/codx）加入 PATH（通过 `env.sh`），写入 shell integration，并渲染 harness entry
+files。当前已经打开的 shell 需要手动加载：
 
 ```bash
 . ~/.agents/.dotpanel/env.sh

@@ -16,8 +16,9 @@
   from a provider registry at `~/.agents/secrets/dkey.providers.json`.
 - `dkey identity import PATH [--force]` and `dkey identity import --stdin [--force]`
   for importing an existing age identity.
-- Shell aliases `claw` and `codx` for permission-free harness invocation
-  (installed by `dot init` via `env.sh`).
+- `dot init`/`dot set path` add `~/.agents/tools/bin` to PATH via `env.sh`, so the
+  `claw`/`clawb` (claude) and `codx`/`codxb` (codex) multi-call scripts resolve
+  there — per-invocation backend switch from `dkey.providers.json`, no shell aliases.
 
 ### Removed
 - Public apt/brew packaging (`debian/`, `homebrew/`) and their README install

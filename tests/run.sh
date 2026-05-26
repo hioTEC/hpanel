@@ -40,9 +40,11 @@ test -f "$HOME/.codex/AGENTS.md"
 test -f "$HOME/.kimi/AGENTS.md"
 grep -q '`~/.agents/` is your memspace' "$HOME/.claude/CLAUDE.md"
 # claw/clawb and codx/codxb are memspace PATH scripts (~/.agents/tools/bin/),
-# per-invocation backend switch — not env.sh aliases. dotpanel emits neither.
+# per-invocation backend switch — not env.sh aliases. dotpanel emits neither,
+# but env.sh DOES put ~/.agents/tools/bin on PATH so the scripts resolve.
 ! grep -q "alias claw=" "$HOME/.agents/.dotpanel/env.sh"
 ! grep -q "alias codx=" "$HOME/.agents/.dotpanel/env.sh"
+case ":$PATH:" in *":$HOME/.agents/tools/bin:"*) ;; *) echo "FAIL: tools/bin not on PATH after sourcing env.sh"; exit 1 ;; esac
 
 test -f "$HOME/.agents/.dotpanel/plugins/memspace/skills/minimal/SKILL.md"
 

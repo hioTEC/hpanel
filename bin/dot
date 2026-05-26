@@ -16,6 +16,7 @@ DOT_DIR="$AGENTS_DIR/.dotpanel"
 ENTRY_FILE="$AGENTS_DIR/AGENTS.md"
 GITIGNORE_FILE="$AGENTS_DIR/.gitignore"
 DOT_BIN="$DOT_DIR/bin"
+TOOLS_BIN="$AGENTS_DIR/tools/bin"
 ENV_FILE="$DOT_DIR/env.sh"
 TEMPLATE_ENTRY="$DOT_DIR/templates/AGENTS.md"
 
@@ -90,6 +91,10 @@ case ":\$PATH:" in
     *":$DOT_BIN:"*) ;;
     *) export PATH="$DOT_BIN:\$PATH" ;;
 esac
+case ":\$PATH:" in
+    *":$TOOLS_BIN:"*) ;;
+    *) export PATH="$TOOLS_BIN:\$PATH" ;;
+esac
 
 dkey() {
     case "\${1:-}" in
@@ -107,8 +112,8 @@ dkey() {
     esac
 }
 
-# claw/clawb (claude) and codx/codxb (codex) are now PATH scripts in
-# ~/.agents/tools/bin/ — per-invocation backend switch via dkey.providers.json.
+# claw/clawb (claude) and codx/codxb (codex) live in ~/.agents/tools/bin/
+# (added to PATH above) — per-invocation backend switch via dkey.providers.json.
 # No aliases emitted here.
 EOF
     if [ -f "$ENV_FILE" ] && cmp -s "$ENV_FILE" "$tmp"; then

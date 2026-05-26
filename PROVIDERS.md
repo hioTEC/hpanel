@@ -1,5 +1,13 @@
 # dkey providers registry
 
+> **`dkey use` is deprecated (2026-05).** Permanent backend switching (writing
+> `~/.claude/settings.json` / `~/.codex/config.toml`) is superseded by
+> **per-invocation** switching: `claw`/`clawb` (claude) and `codx`/`codxb` (codex)
+> read this same registry and apply a backend per-process — so concurrent workers
+> can target different backends, which a global settings file can't. The `dkey use`
+> command is retained (not removed) but is no longer the recommended path.
+> **This file remains the single backend-definition source** for both paths.
+
 `dkey use` reads `~/.agents/secrets/dkey.providers.json` to configure AI
 coding harnesses for a specific backend and profile.
 

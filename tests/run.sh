@@ -16,6 +16,17 @@ bash -n "$ROOT/bin/dkey"
 command -v jq >/dev/null 2>&1
 
 sh "$HOME/.agents/.dotpanel/bin/dot" init --yes
+printf '# Test memspace\n' > "$HOME/.agents/AGENTS.md"
+mkdir -p "$HOME/.agents/skills/minimal"
+cat > "$HOME/.agents/skills/minimal/SKILL.md" <<'SKILL'
+---
+name: minimal
+description: Minimal Matt-style skill without deprecated type metadata.
+---
+
+# Minimal
+SKILL
+"$HOME/.agents/.dotpanel/bin/dot" set claude
 "$HOME/.agents/.dotpanel/bin/dot" doctor
 "$HOME/.agents/.dotpanel/bin/dot" set -a
 
@@ -28,8 +39,12 @@ test -f "$HOME/.claude/CLAUDE.md"
 test -f "$HOME/.codex/AGENTS.md"
 test -f "$HOME/.kimi/AGENTS.md"
 grep -q '`~/.agents/` is your memspace' "$HOME/.claude/CLAUDE.md"
-grep -qxF "alias claw='claude --dangerously-skip-permissions'" "$HOME/.agents/.dotpanel/env.sh"
-grep -qxF "alias codx='codex --dangerously-bypass-approvals-and-sandbox'" "$HOME/.agents/.dotpanel/env.sh"
+# claw/clawb and codx/codxb are memspace PATH scripts (~/.agents/tools/bin/),
+# per-invocation backend switch — not env.sh aliases. dotpanel emits neither.
+! grep -q "alias claw=" "$HOME/.agents/.dotpanel/env.sh"
+! grep -q "alias codx=" "$HOME/.agents/.dotpanel/env.sh"
+
+test -f "$HOME/.agents/.dotpanel/plugins/memspace/skills/minimal/SKILL.md"
 
 git -C "$HOME/.agents" init >/dev/null
 "$HOME/.agents/.dotpanel/bin/dot" sync status >/dev/null

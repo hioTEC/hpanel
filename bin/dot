@@ -107,8 +107,9 @@ dkey() {
     esac
 }
 
-alias claw='claude --dangerously-skip-permissions --plugin-dir \$HOME/.agents/.dotpanel/plugins/memspace'
-alias codx='codex --dangerously-bypass-approvals-and-sandbox'
+# claw/clawb (claude) and codx/codxb (codex) are now PATH scripts in
+# ~/.agents/tools/bin/ — per-invocation backend switch via dkey.providers.json.
+# No aliases emitted here.
 EOF
     if [ -f "$ENV_FILE" ] && cmp -s "$ENV_FILE" "$tmp"; then
         rm -f "$tmp"
@@ -438,7 +439,8 @@ EOF
 generate_claude_plugin() {
     # Build a Claude Code plugin from ~/.agents/skills/.
     # Scans skills/<name>/SKILL.md directories.
-    # Filter: type=skill AND (supported_harnesses includes claude OR unset).
+    # Filter: name is required. Deprecated type=skill is still accepted when
+    # present; supported_harnesses may restrict a skill to Claude.
     # Bundles references/ subdirectories when present.
     # Output: $DOT_DIR/plugins/memspace/
     PLUGIN_DIR="$DOT_DIR/plugins/memspace"
@@ -464,7 +466,9 @@ generate_claude_plugin() {
         harnesses=$(printf '%s\n' "$frontmatter" | sed -n 's/^supported_harnesses: *//p' | head -1)
 
         [ -n "$name" ] || continue
-        [ "$type" = "skill" ] || continue
+        if [ -n "$type" ] && [ "$type" != "skill" ]; then
+            continue
+        fi
 
         if [ -n "$harnesses" ]; then
             case "$harnesses" in

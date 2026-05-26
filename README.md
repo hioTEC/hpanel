@@ -65,11 +65,13 @@ renders the harness entry files. For an already-open shell:
 . ~/.agents/.dotpanel/env.sh
 ```
 
-The shell integration also defines two convenience aliases:
+The shell integration no longer defines `claw`/`codx` aliases — both are memspace
+multi-call PATH scripts in `~/.agents/tools/bin/`, each switching backend
+per-invocation from `dkey.providers.json`:
 
-```bash
-claw='claude --dangerously-skip-permissions'
-codx='codex --dangerously-bypass-approvals-and-sandbox'
+```text
+claw / clawb   — claude front-end / headless worker
+codx / codxb   — codex  front-end / headless worker
 ```
 
 After updating dotpanel (`dot self update` or `dot set path`), source again:
@@ -78,7 +80,7 @@ After updating dotpanel (`dot self update` or `dot set path`), source again:
 . ~/.agents/.dotpanel/env.sh
 ```
 
-If the aliases are still missing (`claw: command not found`), regenerate the env
+If `codx` is still missing (`codx: command not found`), regenerate the env
 file first:
 
 ```bash

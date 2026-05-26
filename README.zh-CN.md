@@ -83,11 +83,13 @@ integration，并渲染 harness entry files。当前已经打开的 shell 需要
 . ~/.agents/.dotpanel/env.sh
 ```
 
-shell integration 也会定义两个便捷 alias：
+shell integration 不再定义 `claw`/`codx` alias——两者都是 memspace 的 multi-call
+PATH 脚本（`~/.agents/tools/bin/`），各自从 `dkey.providers.json` per-invocation
+切换后端：
 
-```bash
-claw='claude --dangerously-skip-permissions'
-codx='codex --dangerously-bypass-approvals-and-sandbox'
+```text
+claw / clawb   — claude 前台 / headless 苦力
+codx / codxb   — codex  前台 / headless 苦力
 ```
 
 更新 dotpanel 后（`dot self update` 或 `dot set path`），重新加载：
@@ -96,7 +98,7 @@ codx='codex --dangerously-bypass-approvals-and-sandbox'
 . ~/.agents/.dotpanel/env.sh
 ```
 
-如果 alias 仍然缺失（`claw: command not found`），先重新生成 env 文件：
+如果 `codx` 仍然缺失（`codx: command not found`），先重新生成 env 文件：
 
 ```bash
 dot set path && . ~/.agents/.dotpanel/env.sh

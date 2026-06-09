@@ -15,6 +15,7 @@ AGENTS_DIR="${DOT_AGENTS_DIR:-$HOME_DIR/.agents}"
 DOT_DIR="$AGENTS_DIR/.dotpanel"
 ENTRY_FILE="$AGENTS_DIR/AGENTS.md"
 GITIGNORE_FILE="$AGENTS_DIR/.gitignore"
+CLAUDE_SKILLS="$HOME_DIR/.claude/skills"
 DOT_BIN="$DOT_DIR/bin"
 TOOLS_BIN="$AGENTS_DIR/tools/bin"
 ENV_FILE="$DOT_DIR/env.sh"
@@ -441,72 +442,160 @@ Do not recursively scan `~/.agents/` or `./.agents/`. Read only the entry files 
 EOF
 }
 
-generate_claude_plugin() {
-    # Build a Claude Code plugin from ~/.agents/skills/.
-    # Scans skills/<name>/SKILL.md directories.
-    # Filter: name is required. Deprecated type=skill is still accepted when
-    # present; supported_harnesses may restrict a skill to Claude.
-    # Bundles references/ subdirectories when present.
-    # Output: $DOT_DIR/plugins/memspace/
-    PLUGIN_DIR="$DOT_DIR/plugins/memspace"
-    SKILLS_SRC="$AGENTS_DIR/skills"
+# _gen_plugin_flat <name> <src_dir> — generate a plugin from flat skill dirs.
+# Scans <src_dir>/*/SKILL.md. Output: $CLAUDE_SKILLS/<name>/
+_gen_plugin_flat() {
+    plugin_name="$1"
+    src_dir="$2"
+    out_dir="$CLAUDE_SKILLS/$plugin_name"
 
-    [ -d "$SKILLS_SRC" ] || return 0
+    [ -d "$src_dir" ] || return 0
 
-    TMP_PLUGIN="$DOT_DIR/var/plugin.memspace.$$"
-    rm -rf "$TMP_PLUGIN"
-    mkdir -p "$TMP_PLUGIN/.claude-plugin" "$TMP_PLUGIN/skills"
+    tmp="$DOT_DIR/var/plugin.$plugin_name.$$"
+    rm -rf "$tmp"
+    mkdir -p "$tmp/.claude-plugin" "$tmp/skills"
 
     count=0
-
-    for skill_dir in "$SKILLS_SRC"/*/; do
+    for skill_dir in "$src_dir"/*/; do
         [ -d "$skill_dir" ] || continue
         skill_file="$skill_dir/SKILL.md"
         [ -f "$skill_file" ] || continue
 
         frontmatter=$(awk 'BEGIN{c=0} /^---$/{c++; if(c==2) exit; next} c==1' "$skill_file")
+        skill_name=$(printf '%s\n' "$frontmatter" | sed -n 's/^name: *//p' | head -1)
+        skill_type=$(printf '%s\n' "$frontmatter" | sed -n 's/^type: *//p' | head -1)
+        skill_harnesses=$(printf '%s\n' "$frontmatter" | sed -n 's/^supported_harnesses: *//p' | head -1)
 
-        name=$(printf '%s\n' "$frontmatter" | sed -n 's/^name: *//p' | head -1)
-        type=$(printf '%s\n' "$frontmatter" | sed -n 's/^type: *//p' | head -1)
-        harnesses=$(printf '%s\n' "$frontmatter" | sed -n 's/^supported_harnesses: *//p' | head -1)
-
-        [ -n "$name" ] || continue
-        if [ -n "$type" ] && [ "$type" != "skill" ]; then
-            continue
+        [ -n "$skill_name" ] || continue
+        [ -z "$skill_type" ] || [ "$skill_type" = "skill" ] || continue
+        if [ -n "$skill_harnesses" ]; then
+            case "$skill_harnesses" in *claude*) ;; *) continue ;; esac
         fi
 
-        if [ -n "$harnesses" ]; then
-            case "$harnesses" in
-                *claude*) ;;
-                *) continue ;;
-            esac
-        fi
-
-        # Copy entire skill directory (SKILL.md + references/ etc.)
-        cp -r "$skill_dir" "$TMP_PLUGIN/skills/$name"
-
+        cp -r "$skill_dir" "$tmp/skills/$skill_name"
         count=$((count + 1))
     done
 
-    cat > "$TMP_PLUGIN/.claude-plugin/plugin.json" <<'PLUGINJSON'
+    cat > "$tmp/.claude-plugin/plugin.json" <<PLUGINJSON
 {
-  "name": "memspace",
-  "description": "User memspace skills from ~/.agents/skills/",
-  "author": {
-    "name": "dot"
-  }
+  "name": "$plugin_name",
+  "description": "$plugin_name skills from memspace",
+  "author": { "name": "dot" }
 }
 PLUGINJSON
 
-    mkdir -p "$(dirname "$PLUGIN_DIR")"
-    rm -rf "$PLUGIN_DIR"
-    mv "$TMP_PLUGIN" "$PLUGIN_DIR"
+    mkdir -p "$(dirname "$out_dir")"
+    rm -rf "$out_dir"
+    mv "$tmp" "$out_dir"
+    info "generated $plugin_name plugin: $count skill(s) -> $out_dir"
+}
 
-    if [ "$count" -gt 0 ]; then
-        info "generated memspace plugin: $count skill(s) -> $PLUGIN_DIR"
-    else
-        info "generated memspace plugin: 0 qualifying skills -> $PLUGIN_DIR"
+# _gen_matt_plugin — generate from mattpocock/skills git clone.
+# Reads upstream .claude-plugin/plugin.json for the skill manifest,
+# flattens categorized paths (skills/engineering/diagnose) into flat skill dirs.
+# Output: $CLAUDE_SKILLS/matt/
+_gen_matt_plugin() {
+    src="$AGENTS_DIR/skills/matt"
+    out_dir="$CLAUDE_SKILLS/matt"
+    manifest="$src/.claude-plugin/plugin.json"
+
+    [ -d "$src" ] || return 0
+    [ -f "$manifest" ] || { warn "matt plugin.json missing at $manifest"; return 0; }
+    command -v jq >/dev/null || { warn "jq required for matt plugin generation"; return 0; }
+
+    tmp="$DOT_DIR/var/plugin.matt.$$"
+    rm -rf "$tmp"
+    mkdir -p "$tmp/.claude-plugin" "$tmp/skills"
+
+    # Write skill paths to temp file to avoid subshell pipe
+    skill_list="$DOT_DIR/var/.matt_skills.$$"
+    jq -r '.skills[]' "$manifest" > "$skill_list"
+
+    count=0
+    while IFS= read -r skill_path; do
+        [ -n "$skill_path" ] || continue
+        skill_dir="$src/$skill_path"
+        skill_file="$skill_dir/SKILL.md"
+        [ -f "$skill_file" ] || { warn "matt skill not found: $skill_path"; continue; }
+
+        frontmatter=$(awk 'BEGIN{c=0} /^---$/{c++; if(c==2) exit; next} c==1' "$skill_file")
+        skill_name=$(printf '%s\n' "$frontmatter" | sed -n 's/^name: *//p' | head -1)
+        [ -n "$skill_name" ] || continue
+
+        cp -r "$skill_dir" "$tmp/skills/$skill_name"
+        count=$((count + 1))
+    done < "$skill_list"
+    rm -f "$skill_list"
+
+    cat > "$tmp/.claude-plugin/plugin.json" <<PLUGINJSON
+{
+  "name": "matt",
+  "description": "Matt Pocock engineering & productivity skills",
+  "author": { "name": "dot" }
+}
+PLUGINJSON
+
+    mkdir -p "$(dirname "$out_dir")"
+    rm -rf "$out_dir"
+    mv "$tmp" "$out_dir"
+    info "generated matt plugin: $count skill(s) -> $out_dir"
+}
+
+# _gen_impeccable_plugin — generate from pbakaus/impeccable git clone.
+# Moves scripts/ to plugin root so hardcoded .claude/skills/impeccable/scripts/
+# paths work natively. reference/ stays inside the skill dir for relative refs.
+# Output: $CLAUDE_SKILLS/impeccable/
+_gen_impeccable_plugin() {
+    src="$AGENTS_DIR/skills/impeccable"
+    skill_src="$src/plugin/skills/impeccable"
+    out_dir="$CLAUDE_SKILLS/impeccable"
+
+    [ -d "$skill_src" ] || { warn "impeccable skill not found at $skill_src"; return 0; }
+
+    tmp="$DOT_DIR/var/plugin.impeccable.$$"
+    rm -rf "$tmp"
+    mkdir -p "$tmp/.claude-plugin" "$tmp/skills/impeccable"
+
+    # SKILL.md + reference/ stay inside skills/impeccable/
+    cp "$skill_src/SKILL.md" "$tmp/skills/impeccable/"
+    if [ -d "$skill_src/reference" ]; then
+        cp -r "$skill_src/reference" "$tmp/skills/impeccable/reference"
     fi
+
+    # Scripts go to plugin root so .claude/skills/impeccable/scripts/ works
+    if [ -d "$skill_src/scripts" ]; then
+        cp -r "$skill_src/scripts" "$tmp/scripts"
+    fi
+
+    # Agents (if any)
+    if [ -d "$src/plugin/agents" ]; then
+        cp -r "$src/plugin/agents" "$tmp/agents"
+    fi
+
+    cat > "$tmp/.claude-plugin/plugin.json" <<PLUGINJSON
+{
+  "name": "impeccable",
+  "description": "Frontend design & craft skill — 23 sub-commands",
+  "author": { "name": "dot" }
+}
+PLUGINJSON
+
+    mkdir -p "$(dirname "$out_dir")"
+    rm -rf "$out_dir"
+    mv "$tmp" "$out_dir"
+    info "generated impeccable plugin -> $out_dir"
+}
+
+generate_claude_plugins() {
+    # Build per-source Claude Code plugins from ~/.agents/skills/{hio,matt,impeccable}/.
+    # Output: ~/.claude/skills/{hio,matt,impeccable}/
+    # Claude Code auto-discovers plugins with .claude-plugin/plugin.json in this directory.
+    SKILLS_SRC="$AGENTS_DIR/skills"
+    [ -d "$SKILLS_SRC" ] || return 0
+
+    _gen_plugin_flat "hio" "$SKILLS_SRC/hio"
+    _gen_matt_plugin
+    _gen_impeccable_plugin
 }
 
 write_file_if_changed() {
@@ -527,7 +616,7 @@ configure_one() {
     case "$harness" in
         claude)
             target="$HOME_DIR/.claude/CLAUDE.md"
-            generate_claude_plugin
+            generate_claude_plugins
             ;;
         codex) target="$HOME_DIR/.codex/AGENTS.md" ;;
         kimi) target="$HOME_DIR/.kimi/AGENTS.md" ;;
@@ -577,7 +666,7 @@ Usage:
 TARGET = path | claude | codex | kimi
 
   path   - write env.sh and inject the source line into the shell rc
-  claude - render ~/.claude/CLAUDE.md and generate the memspace plugin
+  claude - render ~/.claude/CLAUDE.md and generate .claude/skills/ plugins (hio/matt/impeccable)
   codex  - render ~/.codex/AGENTS.md
   kimi   - render ~/.kimi/AGENTS.md
 
@@ -631,7 +720,7 @@ Usage:
 TARGET = path | claude | codex | kimi
 
   path   - remove the source line from shell rc and delete env.sh
-  claude - delete ~/.claude/CLAUDE.md and the memspace plugin directory
+  claude - delete ~/.claude/CLAUDE.md and the generated plugin directories
   codex  - delete ~/.codex/AGENTS.md
   kimi   - delete ~/.kimi/AGENTS.md
 
@@ -660,13 +749,15 @@ unset_one() {
         info "$target already absent"
     fi
     if [ "$harness" = "claude" ]; then
-        plugin_dir="$DOT_DIR/plugins/memspace"
-        if [ -d "$plugin_dir" ]; then
-            rm -rf "$plugin_dir"
-            info "removed $plugin_dir"
-        else
-            info "$plugin_dir already absent"
-        fi
+        for plugin_name in hio matt impeccable; do
+            plugin_dir="$CLAUDE_SKILLS/$plugin_name"
+            if [ -d "$plugin_dir/.claude-plugin" ]; then
+                rm -rf "$plugin_dir"
+                info "removed $plugin_dir"
+            else
+                info "$plugin_dir already absent"
+            fi
+        done
     fi
 }
 
@@ -760,15 +851,17 @@ doctor_cmd() {
             warn "wrapper missing or unmanaged: $target"
         fi
     done
-    PLUGIN_DIR="$DOT_DIR/plugins/memspace"
-    PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
-    if [ -f "$PLUGIN_JSON" ]; then
-        skill_count=$(find "$PLUGIN_DIR/skills" -name SKILL.md 2>/dev/null | wc -l)
-        info "memspace plugin: $skill_count skill(s) at $PLUGIN_DIR"
-    else
-        warn "memspace plugin missing at $PLUGIN_DIR; run 'dot set claude'"
-        problems=$((problems + 1))
-    fi
+    PLUGIN_DIR="$CLAUDE_SKILLS"
+    for plugin_name in hio matt impeccable; do
+        PLUGIN_JSON="$PLUGIN_DIR/$plugin_name/.claude-plugin/plugin.json"
+        if [ -f "$PLUGIN_JSON" ]; then
+            skill_count=$(find "$PLUGIN_DIR/$plugin_name/skills" -name SKILL.md 2>/dev/null | wc -l)
+            info "$plugin_name plugin: $skill_count skill(s) at $PLUGIN_DIR/$plugin_name"
+        else
+            warn "$plugin_name plugin missing; run 'dot set claude'"
+            problems=$((problems + 1))
+        fi
+    done
     case ":$PATH:" in
         *":$DOT_BIN:"*) info "dotpanel bin is on PATH: $DOT_BIN" ;;
         *) warn "dotpanel bin is not on PATH in this shell: $DOT_BIN" ;;

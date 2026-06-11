@@ -24,24 +24,6 @@ agent 应该知道什么，由你的 memspace 决定。
 
 ## 安装
 
-### Homebrew（macOS / Linux）
-
-```bash
-brew tap hioTEC/dotpanel
-brew install dotpanel
-dot init
-```
-
-### dpkg（Debian / Ubuntu）
-
-```bash
-curl -LO https://github.com/hioTEC/dotpanel/releases/latest/download/dotpanel_latest_all.deb
-sudo dpkg -i dotpanel_latest_all.deb
-dot init
-```
-
-### 从源码安装（所有平台）
-
 依赖：
 
 - `git`
@@ -132,19 +114,19 @@ dot sync pull
 dot sync push "sync memspace"
 ```
 
-更新这个公开工具 checkout：
-
-```bash
-dot self status
-dot self update
-```
-
 切换 harness backend（读取 `~/.agents/secrets/dkey.providers.json`）：
 
 ```bash
 dkey use claude:deepseek
 dkey use codex:qwen:payg-global
 dkey use all:deepseek
+```
+
+更新这个公开工具 checkout：
+
+```bash
+dot self status
+dot self update
 ```
 
 ## `dot` 做什么

@@ -23,14 +23,9 @@ here.
 
 ## Read Families
 
-Add routing here as the memspace grows. Start with the family, then lazy-load
-only the named files.
-
-Examples:
-
-- skill or slash command -> `skills/README.md`, then the named skill
-- service / deploy / secrets / external resource -> `rules/flow-resource-ops.md`
-- repeated friction / protocol improvement -> `rules/flow-improve-protocol.md`
+Keep this entry self-contained at first. Add a route only after its target
+exists, and lazy-load only the named files. Link to one source of truth instead
+of copying its contents into this entry.
 
 ## Hard Edges
 
@@ -55,9 +50,10 @@ changes. It renders the managed Claude, Codex, and Kimi entry files. Use
 `dot set claude`, `dot set codex`, or `dot set kimi` for one harness.
 
 Use `dot sync status`, `dot sync diff`, `dot sync pull`, and `dot sync push` to
-move the memspace repo across machines. `dot sync pull` is fast-forward only
-and re-renders entries afterward. `dot sync push` stages all non-ignored
-memspace changes under `~/.agents`, commits when needed, and pushes.
+move the memspace repo across machines. `dot sync pull` fetches, requires a
+clean worktree and a fast-forward path, then re-renders entries. `dot sync push`
+requires a clean worktree and pushes existing commits only; it never stages or
+commits files.
 
 Use `dkey keygen` once to create the local age identity. Use
 `dkey set NAME VALUE` or `dkey set NAME=VALUE` to create or overwrite encrypted

@@ -15,6 +15,19 @@ bash -n "$ROOT/bin/dot"
 bash -n "$ROOT/bin/dkey"
 command -v jq >/dev/null 2>&1
 
+template_home="$TMP/template-home"
+fallback_home="$TMP/fallback-home"
+mkdir -p "$template_home/.agents/.dotpanel" "$fallback_home/.agents/.dotpanel"
+cp -R "$ROOT/bin" "$template_home/.agents/.dotpanel/bin"
+cp -R "$ROOT/templates" "$template_home/.agents/.dotpanel/templates"
+cp -R "$ROOT/bin" "$fallback_home/.agents/.dotpanel/bin"
+HOME="$template_home" sh "$template_home/.agents/.dotpanel/bin/dot" init --template --no-path >/dev/null
+HOME="$fallback_home" sh "$fallback_home/.agents/.dotpanel/bin/dot" init --template --no-path >/dev/null
+cmp -s "$template_home/.agents/AGENTS.md" "$fallback_home/.agents/AGENTS.md"
+! grep -Eq 'flow-resource-ops|flow-improve-protocol' "$template_home/.agents/AGENTS.md"
+! grep -q 'stages all non-ignored' "$template_home/.agents/AGENTS.md"
+grep -q 'Add a route only after its target' "$template_home/.agents/AGENTS.md"
+
 sh "$HOME/.agents/.dotpanel/bin/dot" init --yes
 printf '# Test memspace\n' > "$HOME/.agents/AGENTS.md"
 mkdir -p "$HOME/.agents/skills/hio/minimal"

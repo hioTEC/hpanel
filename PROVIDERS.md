@@ -1,15 +1,17 @@
 # dkey providers registry
 
-> **`dkey use` is deprecated (2026-05).** Permanent backend switching (writing
-> `~/.claude/settings.json` / `~/.codex/config.toml`) is superseded by
-> **per-invocation** switching: `claw`/`clawb` (claude) and `codx`/`codxb` (codex)
-> read this same registry and apply a backend per-process — so concurrent workers
-> can target different backends, which a global settings file can't. The `dkey use`
-> command is retained (not removed) but is no longer the recommended path.
-> **This file remains the single backend-definition source** for both paths.
+`~/.agents/secrets/dkey.providers.json` is the single backend-definition source
+for per-invocation wrappers:
 
-`dkey use` reads `~/.agents/secrets/dkey.providers.json` to configure AI
-coding harnesses for a specific backend and profile.
+- `claw` / `clawb` for Claude-compatible backends
+- `codx` / `codxb` for Codex-compatible backends
+- `gem` / `gemb` for Gemini-compatible backends
+
+The wrappers read this registry, load required secrets through
+`dkey run --with llm-backends`, and apply backend settings only to the process
+they launch. Persistent backend switching via `dkey use` has been removed
+because it wrote global harness config and could overwrite Codex ChatGPT/OAuth
+auth state with API-key mode.
 
 A template is available at `templates/secrets/dkey.providers.example.json`.
 
@@ -19,9 +21,10 @@ A template is available at `templates/secrets/dkey.providers.example.json`.
 # Create your providers registry from the template
 cp ~/.agents/.dotpanel/templates/secrets/dkey.providers.example.json \
    ~/.agents/secrets/dkey.providers.json
-# Edit it with real provider values, then:
+# Edit it with real provider values, then store its secret and run per invocation:
 dkey set MY_KEY my-api-key-value
-dkey use claude:example
+claw example
+codx example "prompt"
 ```
 
 ## Schema
@@ -42,14 +45,14 @@ dkey use claude:example
 | `defaults.claude.home_path` | string | no | Path to Claude home JSON (default `~/.claude.json`). |
 | `defaults.claude.home` | object | no | Default values merged into `~/.claude.json`. |
 | `defaults.claude.settings.env` | object | no | Default env vars merged into settings. |
-| `defaults.claude.managed_env_keys` | []string | no | Env keys that `dkey use` will purge from settings before writing new ones. |
+| `defaults.claude.managed_env_keys` | []string | no | Legacy field kept for old registries; wrappers do not write global settings. |
 | `defaults.codex.config_path` | string | no | Path to Codex config TOML (default `~/.codex/config.toml`). |
 
 ### `providers.<name>`
 
 | Key | Type | Required | Description |
 |---|---|---|---|
-| `default_profile` | string | yes | Profile to use when none is given in `dkey use`. |
+| `default_profile` | string | yes | Profile to use when a wrapper is called with only the provider name. |
 | `secret` | string | no | Default secret name for provider-wide API key. |
 | `profiles` | object | yes | Named profiles under this provider. |
 
@@ -68,16 +71,16 @@ section must be present.
 
 | Key | Type | Required | Description |
 |---|---|---|---|
-| `settings.env` | object | no | Env vars to write into `~/.claude/settings.json`. Values can be literal strings or `{"secret": "KEY_NAME"}` to resolve from the encrypted keys file. |
-| `home` | object | no | Values merged into `~/.claude.json`. |
+| `settings.env` | object | no | Env vars exported for the launched Claude process. Values can be literal strings or `{"secret": "KEY_NAME"}` to resolve from the encrypted keys file. |
+| `home` | object | no | Legacy field kept for old registries; wrappers do not write `~/.claude.json`. |
 
 ### `profiles.<name>.codex`
 
 | Key | Type | Required | Description |
 |---|---|---|---|
-| `model` | string | yes | Model identifier written to `config.toml`. |
-| `model_provider` | string | yes | Provider ID used as `[model_providers.<id>]` in TOML. |
-| `model_provider_config` | object | yes | Key-value pairs written under the provider TOML section. |
+| `model` | string | yes | Model identifier passed to Codex for this invocation. |
+| `model_provider` | string | yes | Provider ID passed as `model_provider` for this invocation. |
+| `model_provider_config` | object | yes | Key-value pairs passed as `model_providers.<id>.*` overrides for this invocation. |
 | `status` | string | no | `supported` (default) or other value to block application. |
 | `status_message` | string | no | Human explanation shown when status is not `supported`. |
 
@@ -88,7 +91,7 @@ The `model_provider_config` object must include at minimum:
 | `name` | string | yes | Display name for the provider. |
 | `base_url` | string | yes | API base URL (e.g. `https://api.openai.com/v1`). |
 | `wire_api` | string | yes | Must be `responses` for Codex 0.130+. |
-| `requires_openai_auth` | bool | no | Whether to write an `auth.json` with the API key. |
+| `requires_openai_auth` | bool | no | Whether Codex should use its OpenAI/Codex auth path for the provider. Wrappers pass this as a process-local config override and do not write `auth.json`. |
 
 ## Secret resolution
 
@@ -99,12 +102,13 @@ decrypted value.
 ## Example usage
 
 ```bash
-# Switch Claude Code to the deepseek backend using its default profile
-dkey use claude:deepseek
+# Run Claude Code against the deepseek backend using its default profile
+claw deepseek
 
-# Switch Codex to a specific qwen profile
-dkey use codex:qwen:payg-global
+# Run Codex against qwen for this invocation only
+codx qwen "prompt"
 
-# Switch both harnesses
-dkey use all:deepseek
+# Headless workers
+clawb kimi "prompt"
+codxb qwen "prompt"
 ```

@@ -17,8 +17,8 @@ command -v jq >/dev/null 2>&1
 
 sh "$HOME/.agents/.dotpanel/bin/dot" init --yes
 printf '# Test memspace\n' > "$HOME/.agents/AGENTS.md"
-mkdir -p "$HOME/.agents/skills/minimal"
-cat > "$HOME/.agents/skills/minimal/SKILL.md" <<'SKILL'
+mkdir -p "$HOME/.agents/skills/hio/minimal"
+cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
 ---
 name: minimal
 description: Minimal Matt-style skill without deprecated type metadata.
@@ -26,12 +26,33 @@ description: Minimal Matt-style skill without deprecated type metadata.
 
 # Minimal
 SKILL
+mkdir -p "$HOME/.agents/skills/matt/.claude-plugin" "$HOME/.agents/skills/matt/skills/engineering/diagnose"
+cat > "$HOME/.agents/skills/matt/.claude-plugin/plugin.json" <<'JSON'
+{"skills":["skills/engineering/diagnose"]}
+JSON
+cat > "$HOME/.agents/skills/matt/skills/engineering/diagnose/SKILL.md" <<'SKILL'
+---
+name: diagnose
+description: Minimal matt fixture.
+---
+
+# Diagnose
+SKILL
+mkdir -p "$HOME/.agents/skills/impeccable/plugin/skills/impeccable"
+cat > "$HOME/.agents/skills/impeccable/plugin/skills/impeccable/SKILL.md" <<'SKILL'
+---
+name: impeccable
+description: Minimal impeccable fixture.
+---
+
+# Impeccable
+SKILL
 "$HOME/.agents/.dotpanel/bin/dot" set claude
+. "$HOME/.agents/.dotpanel/env.sh"
 "$HOME/.agents/.dotpanel/bin/dot" doctor
 "$HOME/.agents/.dotpanel/bin/dot" set -a
 
 grep -qxF '/.dotpanel/' "$HOME/.agents/.gitignore"
-. "$HOME/.agents/.dotpanel/env.sh"
 test "$(command -v dot)" = "$HOME/.agents/.dotpanel/bin/dot"
 type dkey | grep -q 'dkey is a function'
 test -x "$HOME/.agents/.dotpanel/bin/dkey"
@@ -46,7 +67,9 @@ grep -q '`~/.agents/` is your memspace' "$HOME/.claude/CLAUDE.md"
 ! grep -q "alias codx=" "$HOME/.agents/.dotpanel/env.sh"
 case ":$PATH:" in *":$HOME/.agents/tools/bin:"*) ;; *) echo "FAIL: tools/bin not on PATH after sourcing env.sh"; exit 1 ;; esac
 
-test -f "$HOME/.agents/.dotpanel/plugins/memspace/skills/minimal/SKILL.md"
+test -f "$HOME/.claude/skills/hio/skills/minimal/SKILL.md"
+test -f "$HOME/.claude/skills/matt/skills/diagnose/SKILL.md"
+test -f "$HOME/.claude/skills/impeccable/skills/impeccable/SKILL.md"
 
 git -C "$HOME/.agents" init >/dev/null
 "$HOME/.agents/.dotpanel/bin/dot" sync status >/dev/null
@@ -170,17 +193,13 @@ if command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1; then
   }
 }
 JSON
-  "$HOME/.agents/.dotpanel/bin/dkey" use codex:ok
-  grep -q 'model_provider = "ok"' "$HOME/.codex/config.toml"
-  grep -q 'wire_api = "responses"' "$HOME/.codex/config.toml"
-  jq -e '.auth_mode == "apikey" and .OPENAI_API_KEY == "ok"' "$HOME/.codex/auth.json" >/dev/null
-  "$HOME/.agents/.dotpanel/bin/dkey" use all:blocked 2> "$TMP/dkey-use-blocked.err"
-  grep -q 'blocked for test' "$TMP/dkey-use-blocked.err"
-  jq -e '.env.ANTHROPIC_BASE_URL == "https://blocked.test/anthropic"' "$HOME/.claude/settings.json" >/dev/null
-  if "$HOME/.agents/.dotpanel/bin/dkey" use codex:blocked 2> "$TMP/dkey-use-blocked-strict.err"; then
+  if "$HOME/.agents/.dotpanel/bin/dkey" use codex:ok 2> "$TMP/dkey-use-removed.err"; then
     exit 1
   fi
-  grep -q 'blocked for test' "$TMP/dkey-use-blocked-strict.err"
+  grep -q 'dkey use has been removed' "$TMP/dkey-use-removed.err"
+  test ! -f "$HOME/.codex/auth.json"
+  test ! -f "$HOME/.codex/config.toml"
+  test ! -f "$HOME/.claude/settings.json"
   if "$HOME/.agents/.dotpanel/bin/dot" use codex:ok 2> "$TMP/dot-use-removed.err"; then
     exit 1
   fi

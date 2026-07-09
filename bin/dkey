@@ -33,9 +33,6 @@ Usage:
   dkey edit
   dkey list
   dkey grants
-  dkey use claude:BACKEND[:PROFILE]
-  dkey use codex:BACKEND[:PROFILE]
-  dkey use all:BACKEND[:PROFILE]
   dkey reset claude|codex|all
   dkey status
   dkey doctor
@@ -390,259 +387,28 @@ expand_home_path() {
     esac
 }
 
-write_file_if_changed() {
-    target="$1"
-    tmp="$2"
-    mkdir -p "$(dirname "$target")"
-    if [ -f "$target" ] && cmp -s "$target" "$tmp"; then
-        rm -f "$tmp"
-        info "current $target"
-        return 0
-    fi
-    mv "$tmp" "$target"
-    info "wrote $target"
-}
-
-normalize_lf_file() {
-    _dkey_normalize_file="$1"
-    _dkey_normalize_tmp="$DOT_DIR/var/normalize-lf.$$"
-    tr -d '\r' < "$_dkey_normalize_file" > "$_dkey_normalize_tmp"
-    mv "$_dkey_normalize_tmp" "$_dkey_normalize_file"
-}
-
-toml_quote() {
-    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/^/"/; s/$/"/'
-}
-
 shell_quote() {
     # Single-quote for POSIX shell eval.
     sed "s/'/'\\\\''/g; s/^/'/; s/$/'/"
 }
 
-use_usage() {
-    cat <<'EOF'
-Usage:
-  dkey use claude:BACKEND[:PROFILE]
-  dkey use codex:BACKEND[:PROFILE]
-  dkey use all:BACKEND[:PROFILE]
+use_cmd() {
+    cat >&2 <<'EOF'
+FAIL  dkey use has been removed.
 
-Examples:
-  dkey use claude:deepseek
-  dkey use codex:qwen
-  dkey use codex:qwen:payg-global
+Persistent backend switching wrote global harness config and could overwrite
+Codex ChatGPT/OAuth auth state with API-key mode.
 
-Writes backend settings from ~/.agents/secrets/dkey.providers.json.
-Claude-compatible tools read ~/.claude/settings.json.
-Codex reads ~/.codex/config.toml and ~/.codex/auth.json.
+Use per-invocation wrappers instead:
+  claw <backend[:profile]> [claude args...]
+  clawb <backend[:profile]> "prompt"
+  codx <backend[:profile]> [codex args...]
+  codxb <backend[:profile]> "prompt"
+
+Backend definitions still live in ~/.agents/secrets/dkey.providers.json, and
+wrapper secrets are injected via `dkey run --with llm-backends`.
 EOF
-}
-
-profile_has_harness() {
-    provider="$1"
-    profile="$2"
-    harness="$3"
-    jq -e --arg provider "$provider" --arg profile "$profile" --arg harness "$harness" \
-        '.providers[$provider].profiles[$profile][$harness] != null' "$PROVIDERS_FILE" >/dev/null
-}
-
-write_claude_use() {
-    provider="$1"
-    profile="$2"
-    need_jq
-
-    settings_path="$(expand_home_path "$(jq -r '.defaults.claude.settings_path // "~/.claude/settings.json"' "$PROVIDERS_FILE")")"
-    home_path="$(expand_home_path "$(jq -r '.defaults.claude.home_path // "~/.claude.json"' "$PROVIDERS_FILE")")"
-    mkdir -p "$(dirname "$settings_path")" "$(dirname "$home_path")" "$DOT_DIR/var"
-
-    tmp="$DOT_DIR/var/claude-settings.$$"
-    tmp2="$DOT_DIR/var/claude-settings2.$$"
-    if [ -f "$settings_path" ]; then
-        cp "$settings_path" "$tmp"
-    else
-        printf '{}\n' > "$tmp"
-    fi
-
-    managed="$(jq -c '.defaults.claude.managed_env_keys // []' "$PROVIDERS_FILE")"
-    jq --argjson keys "$managed" '
-        .env = (.env // {})
-        | .env |= with_entries(select((.key | $keys | index(.)) | not))
-    ' "$tmp" > "$tmp2"
-    mv "$tmp2" "$tmp"
-
-    entries="$DOT_DIR/var/claude-env.$$"
-    jq -r --arg provider "$provider" --arg profile "$profile" '
-        ((.defaults.claude.settings.env // {}) + (.providers[$provider].profiles[$profile].claude.settings.env // {}))
-        | to_entries[]
-        | if ((.value | type) == "object" and (.value.secret != null))
-          then [.key, "secret", .value.secret]
-          else [.key, "literal", (.value | tostring)]
-          end
-        | @tsv
-    ' "$PROVIDERS_FILE" > "$entries"
-    normalize_lf_file "$entries"
-
-    while IFS="$(printf '\t')" read -r key kind value; do
-        [ -n "$key" ] || continue
-        if [ "$kind" = "secret" ]; then
-            resolved="$(secret_value "$value")" || fail "secret not found: $value"
-        else
-            resolved="$value"
-        fi
-        jq --arg key "$key" --arg value "$resolved" '.env[$key] = $value' "$tmp" > "$tmp2"
-        mv "$tmp2" "$tmp"
-    done < "$entries"
-    rm -f "$entries"
-
-    write_file_if_changed "$settings_path" "$tmp"
-
-    home_obj="$(jq -c --arg provider "$provider" --arg profile "$profile" '
-        (.defaults.claude.home // {}) * (.providers[$provider].profiles[$profile].claude.home // {})
-    ' "$PROVIDERS_FILE")"
-    if [ "$home_obj" != "{}" ]; then
-        tmp="$DOT_DIR/var/claude-home.$$"
-        tmp2="$DOT_DIR/var/claude-home2.$$"
-        if [ -f "$home_path" ]; then
-            cp "$home_path" "$tmp"
-        else
-            printf '{}\n' > "$tmp"
-        fi
-        jq --argjson home "$home_obj" '. * $home' "$tmp" > "$tmp2"
-        mv "$tmp2" "$tmp"
-        write_file_if_changed "$home_path" "$tmp"
-    fi
-    info "Claude-compatible backend: $provider:$profile"
-}
-
-write_codex_config_file() {
-    provider="$1"
-    profile="$2"
-    config_path="$3"
-    provider_id="$4"
-    model="$5"
-    mkdir -p "$(dirname "$config_path")" "$DOT_DIR/var"
-
-    case "$provider_id" in
-        *[!A-Za-z0-9_-]*|"") fail "invalid Codex provider id: $provider_id" ;;
-    esac
-
-    source_file="$config_path"
-    if [ ! -f "$source_file" ]; then
-        source_file="$DOT_DIR/var/codex-empty.$$"
-        : > "$source_file"
-    fi
-
-    tmp="$DOT_DIR/var/codex-config.$$"
-    rest="$DOT_DIR/var/codex-config-rest.$$"
-    awk -v provider="$provider_id" '
-        BEGIN { top = 1; skip = 0 }
-        /^\[/ {
-            top = 0
-            if ($0 == "[model_providers." provider "]") {
-                skip = 1
-                next
-            }
-            skip = 0
-        }
-        skip { next }
-        top && $0 ~ /^(model_provider|model|review_model)[[:space:]]*=/ { next }
-        { print }
-    ' "$source_file" > "$rest"
-
-    {
-        printf 'model_provider = %s\n' "$(toml_quote "$provider_id")"
-        printf 'model = %s\n' "$(toml_quote "$model")"
-        printf 'review_model = %s\n' "$(toml_quote "$model")"
-        cat "$rest"
-        printf '\n[model_providers.%s]\n' "$provider_id"
-    } > "$tmp"
-
-    entries="$DOT_DIR/var/codex-provider.$$"
-    jq -r --arg provider "$provider" --arg profile "$profile" '
-        .providers[$provider].profiles[$profile].codex.model_provider_config
-        | to_entries[]
-        | [.key, (.value | type), (.value | tostring)]
-        | @tsv
-    ' "$PROVIDERS_FILE" > "$entries"
-    normalize_lf_file "$entries"
-    while IFS="$(printf '\t')" read -r key kind value; do
-        [ -n "$key" ] || continue
-        case "$kind" in
-            string) printf '%s = %s\n' "$key" "$(toml_quote "$value")" >> "$tmp" ;;
-            boolean|number) printf '%s = %s\n' "$key" "$value" >> "$tmp" ;;
-            *) fail "unsupported Codex provider config value for $key: $kind" ;;
-        esac
-    done < "$entries"
-    rm -f "$entries" "$rest"
-    [ "$source_file" = "$config_path" ] || rm -f "$source_file"
-
-    write_file_if_changed "$config_path" "$tmp"
-}
-
-write_codex_auth_file() {
-    secret_name="$1"
-    auth_path="$HOME_DIR/.codex/auth.json"
-    mkdir -p "$(dirname "$auth_path")" "$DOT_DIR/var"
-    secret="$(secret_value "$secret_name")" || fail "secret not found: $secret_name"
-
-    tmp="$DOT_DIR/var/codex-auth.$$"
-    tmp2="$DOT_DIR/var/codex-auth2.$$"
-    if [ -f "$auth_path" ]; then
-        cp "$auth_path" "$tmp"
-    else
-        printf '{}\n' > "$tmp"
-    fi
-    jq --arg key "$secret" '.auth_mode = "apikey" | .OPENAI_API_KEY = $key' "$tmp" > "$tmp2"
-    mv "$tmp2" "$tmp"
-    write_file_if_changed "$auth_path" "$tmp"
-}
-
-write_codex_use() {
-    provider="$1"
-    profile="$2"
-    strict="$3"
-    need_jq
-
-    if ! profile_has_harness "$provider" "$profile" codex; then
-        if [ "$strict" = "yes" ]; then
-            fail "backend profile has no Codex config: $provider:$profile"
-        fi
-        return 3
-    fi
-
-    status="$(jq -r --arg provider "$provider" --arg profile "$profile" '.providers[$provider].profiles[$profile].codex.status // empty' "$PROVIDERS_FILE")"
-    status_message="$(jq -r --arg provider "$provider" --arg profile "$profile" '.providers[$provider].profiles[$profile].codex.status_message // empty' "$PROVIDERS_FILE")"
-    if [ -n "$status" ] && [ "$status" != "supported" ]; then
-        message="${status_message:-Codex profile is marked $status}"
-        if [ "$strict" = "yes" ]; then
-            fail "$message"
-        fi
-        warn "Codex backend not applied for $provider:$profile: $message"
-        return 3
-    fi
-
-    wire_api="$(jq -r --arg provider "$provider" --arg profile "$profile" '.providers[$provider].profiles[$profile].codex.model_provider_config.wire_api // empty' "$PROVIDERS_FILE")"
-    if [ "$wire_api" != "responses" ]; then
-        message="Codex 0.130 requires a Responses API backend; $provider:$profile declares wire_api=$wire_api and has no successful Responses smoke test."
-        if [ "$strict" = "yes" ]; then
-            fail "$message"
-        fi
-        warn "Codex backend not applied for $provider:$profile: $message"
-        return 3
-    fi
-
-    config_path="$(expand_home_path "$(jq -r '.defaults.codex.config_path // "~/.codex/config.toml"' "$PROVIDERS_FILE")")"
-    provider_id="$(jq -r --arg provider "$provider" --arg profile "$profile" '.providers[$provider].profiles[$profile].codex.model_provider' "$PROVIDERS_FILE")"
-    model="$(jq -r --arg provider "$provider" --arg profile "$profile" '.providers[$provider].profiles[$profile].codex.model' "$PROVIDERS_FILE")"
-    secret_name="$(jq -r --arg provider "$provider" --arg profile "$profile" '
-        (.providers[$provider].profiles[$profile].env // {} | to_entries[0].value.secret)
-        // .providers[$provider].secret
-        // empty
-    ' "$PROVIDERS_FILE")"
-    [ -n "$secret_name" ] || fail "Codex backend profile has no secret mapping: $provider:$profile"
-
-    write_codex_config_file "$provider" "$profile" "$config_path" "$provider_id" "$model"
-    write_codex_auth_file "$secret_name"
-    info "Codex backend: $provider:$profile"
+    return 1
 }
 
 reset_cmd() {
@@ -688,88 +454,6 @@ reset_cmd() {
             fi
             ;;
     esac
-}
-
-use_cmd() {
-    need_jq
-    [ -f "$PROVIDERS_FILE" ] || fail "providers registry missing: $PROVIDERS_FILE"
-
-    target=""
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            help|-h|--help)
-                use_usage
-                return 0
-                ;;
-            --harness)
-                fail "dkey use uses HARNESS:BACKEND syntax; try: dkey use claude:deepseek"
-                ;;
-            -*)
-                fail "unknown use argument: $1"
-                ;;
-            *)
-                [ -z "$target" ] || fail "dkey use accepts only one target"
-                target="$1"
-                ;;
-        esac
-        shift
-    done
-
-    [ -n "$target" ] || fail "use requires HARNESS:BACKEND[:PROFILE]"
-    harness="${target%%:*}"
-    if [ "$target" = "$harness" ]; then
-        fail "dkey use target must be HARNESS:BACKEND[:PROFILE]; try: dkey use claude:deepseek"
-    fi
-    backend_spec="${target#*:}"
-    case "$harness" in
-        all|claude|codex) ;;
-        *) fail "unknown harness in dkey use target: $harness" ;;
-    esac
-
-    provider="${backend_spec%%:*}"
-    if [ "$backend_spec" != "$provider" ]; then
-        profile="${backend_spec#*:}"
-        case "$profile" in
-            *:*) fail "dkey use supports at most HARNESS:BACKEND:PROFILE" ;;
-        esac
-    else
-        profile="$(jq -r --arg provider "$provider" '.providers[$provider].default_profile // empty' "$PROVIDERS_FILE")"
-    fi
-    [ -n "$provider" ] || fail "backend is empty"
-    [ -n "$profile" ] || fail "profile is empty for backend: $provider"
-
-    jq -e --arg provider "$provider" '.providers[$provider] != null' "$PROVIDERS_FILE" >/dev/null || fail "unknown backend: $provider"
-    jq -e --arg provider "$provider" --arg profile "$profile" '.providers[$provider].profiles[$profile] != null' "$PROVIDERS_FILE" >/dev/null || fail "unknown backend profile: $provider:$profile"
-
-    applied="no"
-    case "$harness" in
-        all)
-            if profile_has_harness "$provider" "$profile" claude; then
-                write_claude_use "$provider" "$profile"
-                applied="yes"
-            fi
-            if write_codex_use "$provider" "$profile" no; then
-                applied="yes"
-            else
-                code="$?"
-                [ "$code" = "3" ] || return "$code"
-            fi
-            ;;
-        claude)
-            profile_has_harness "$provider" "$profile" claude || fail "backend profile has no Claude-compatible config: $provider:$profile"
-            write_claude_use "$provider" "$profile"
-            applied="yes"
-            ;;
-        codex)
-            write_codex_use "$provider" "$profile" yes
-            applied="yes"
-            ;;
-        *)
-            fail "unknown harness: $harness"
-            ;;
-    esac
-
-    [ "$applied" = "yes" ] || fail "no applicable harness config for backend profile $provider:$profile"
 }
 
 emit_exports_for_grant() {

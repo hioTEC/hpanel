@@ -115,12 +115,14 @@ dot sync pull
 dot sync push "sync memspace"
 ```
 
-Switch harness backends (reads `~/.agents/secrets/dkey.providers.json`):
+Switch AI backends per invocation (reads `~/.agents/secrets/dkey.providers.json`
+and injects keys with the `llm-backends` grant when needed):
 
 ```bash
-dkey use claude:deepseek
-dkey use codex:qwen:payg-global
-dkey use all:deepseek
+claw deepseek
+clawb deepseek "review this change"
+codx qwen
+codxb qwen "review this change"
 ```
 
 Update this public toolkit checkout:
@@ -171,16 +173,20 @@ dkey off
 `dkey on` changes only the current shell. Direct `command dkey on` refuses to
 print secret-bearing shell code; use the shell function installed by `dot init`.
 
-`dkey use` writes harness backend settings from a provider registry:
+AI backend definitions live in `~/.agents/secrets/dkey.providers.json`.
+`claw`/`clawb`, `codx`/`codxb`, and `gem`/`gemb` read that registry and apply
+backend settings only to the process they launch. Secrets are loaded through the
+`llm-backends` grant.
 
 ```bash
-dkey use claude:deepseek       # switch Claude Code to a backend
-dkey use codex:qwen:payg-global # switch Codex to a backend
-dkey use all:deepseek           # switch both
+codx qwen "prompt"
+clawb kimi "prompt"
 ```
 
-The provider registry lives at `~/.agents/secrets/dkey.providers.json`.
-See [PROVIDERS.md](PROVIDERS.md) for the full schema and a template at
+`dkey use` has been removed because it persisted global harness settings and
+could overwrite Codex ChatGPT/OAuth login state with API-key mode. Use
+`dkey reset codex|claude|all` only to clear old persisted backend settings.
+See [PROVIDERS.md](PROVIDERS.md) for the provider schema and a template at
 `templates/secrets/dkey.providers.example.json`.
 
 ## Files Created

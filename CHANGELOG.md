@@ -3,17 +3,14 @@
 ## Unreleased
 
 ### Changed
-- **Breaking:** `dot use` moved to `dkey use`. Backend switching now lives on `dkey`
-  because it reads encrypted secrets. Use `dkey use claude:deepseek`,
-  `dkey use codex:qwen`, or `dkey use all:backend` instead of the old `dot use`
-  syntax.
+- **Breaking:** persistent backend switching via `dkey use` has been removed.
+  Use per-invocation wrappers (`claw`/`clawb`, `codx`/`codxb`, `gem`/`gemb`)
+  instead; they read `dkey.providers.json` and load secrets through grants
+  without rewriting global harness config or Codex auth state.
 
 ### Added
 - `dkey grants` surfaced in `dkey help`/README, and now prints the env vars each
   grant injects (never secret values); `grant not found` errors list available grants.
-- `dkey use` command: writes backend settings for Claude Code (`~/.claude/settings.json`,
-  `~/.claude.json`) and Codex (`~/.codex/config.toml`, `~/.codex/auth.json`)
-  from a provider registry at `~/.agents/secrets/dkey.providers.json`.
 - `dkey identity import PATH [--force]` and `dkey identity import --stdin [--force]`
   for importing an existing age identity.
 - `dot init`/`dot set path` add `~/.agents/tools/bin` to PATH via `env.sh`, so the

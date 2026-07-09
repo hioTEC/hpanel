@@ -114,12 +114,14 @@ dot sync pull
 dot sync push "sync memspace"
 ```
 
-切换 harness backend（读取 `~/.agents/secrets/dkey.providers.json`）：
+按单次调用切换 AI backend（读取 `~/.agents/secrets/dkey.providers.json`，
+需要 key 时通过 `llm-backends` grant 注入）：
 
 ```bash
-dkey use claude:deepseek
-dkey use codex:qwen:payg-global
-dkey use all:deepseek
+claw deepseek
+clawb deepseek "review this change"
+codx qwen
+codxb qwen "review this change"
 ```
 
 更新这个公开工具 checkout：
@@ -170,16 +172,21 @@ dkey off
 `dkey on` 只影响当前 shell。直接运行 `command dkey on` 会拒绝输出含 secret
 的 shell code；要使用 `dot init` 安装的 shell function。
 
-`dkey use` 从 provider registry 写入 harness backend 配置：
+AI backend 定义放在 `~/.agents/secrets/dkey.providers.json`。
+`claw`/`clawb`、`codx`/`codxb`、`gem`/`gemb` 读取这个 registry，并且只对
+本次启动的进程应用 backend 配置。secret 通过 `llm-backends` grant 注入。
 
 ```bash
-dkey use claude:deepseek       # 把 Claude Code 切到某个 backend
-dkey use codex:qwen:payg-global # 把 Codex 切到某个 backend
-dkey use all:deepseek           # 同时切换
+codx qwen "prompt"
+clawb kimi "prompt"
 ```
 
-Provider registry 位于 `~/.agents/secrets/dkey.providers.json`。
-参见 [PROVIDERS.md](PROVIDERS.md) 了解完整 schema，模板在
+`dkey use` 已移除，因为它会持久写入全局 harness 设置，并可能把 Codex
+ChatGPT/OAuth 登录态覆盖成 API-key mode。`dkey reset codex|claude|all` 只用于
+清理旧的持久 backend 设置。
+
+Provider registry 位于 `~/.agents/secrets/dkey.providers.json`。参见
+[PROVIDERS.md](PROVIDERS.md) 了解完整 schema，模板在
 `templates/secrets/dkey.providers.example.json`。
 
 ## 创建的文件

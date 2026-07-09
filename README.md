@@ -112,8 +112,14 @@ Sync the private memspace repo:
 dot sync status
 dot sync diff
 dot sync pull
-dot sync push "sync memspace"
+dot sync push
 ```
+
+`dot sync push` pushes existing commits only. It refuses staged, unstaged, or
+untracked files and never stages or commits them. Commit the exact paths you
+intend to share before running it. `dot sync pull` prints status, fetches, then
+requires a clean worktree and a fast-forward path before updating and
+re-rendering harness files.
 
 Switch AI backends per invocation (reads `~/.agents/secrets/dkey.providers.json`
 and injects keys with the `llm-backends` grant when needed):
@@ -140,7 +146,9 @@ dot self update
 - `dot set` renders minimal harness entry files from `~/.agents/AGENTS.md`.
 - `dot sync` runs git operations in `~/.agents`.
 - `dot self` runs git operations in `~/.agents/.dotpanel`.
-- `dot doctor` checks that the local setup is coherent.
+- `dot doctor` checks that the entry exists and generated wrappers and Claude
+  plugins exactly match their source render. These coherence failures return a
+  non-zero status.
 
 Rendered harness entries are deliberately tiny. They tell the harness to read
 `~/.agents/AGENTS.md`; they do not duplicate your private rules.
@@ -210,7 +218,11 @@ See [PROVIDERS.md](PROVIDERS.md) for the provider schema and a template at
 - `~/.agents` is user-owned and private.
 - `~/.agents/.dotpanel` is the managed public checkout and should be ignored by
   the memspace repo.
-- `dot sync push` stages all non-ignored changes under `~/.agents`.
+- `dot sync push` refuses a dirty memspace and pushes existing commits only; it
+  never stages or commits files.
+- `dot sync pull` fetches before its clean-worktree and fast-forward-only gates;
+  harness files are rendered only after a successful update.
+- `dot self update` refuses a dirty managed checkout.
 - `dkey` is privileged; do not use it from subagents or scripts that should not
   see secrets.
 

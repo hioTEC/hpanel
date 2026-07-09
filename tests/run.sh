@@ -50,6 +50,31 @@ SKILL
 "$HOME/.agents/.dotpanel/bin/dot" set claude
 . "$HOME/.agents/.dotpanel/env.sh"
 "$HOME/.agents/.dotpanel/bin/dot" doctor
+
+mv "$HOME/.agents/AGENTS.md" "$HOME/.agents/AGENTS.md.saved"
+if "$HOME/.agents/.dotpanel/bin/dot" doctor > "$TMP/dot-doctor-missing-entry.out" 2>&1; then
+  echo "FAIL: dot doctor accepted a missing memspace entry" >&2
+  exit 1
+fi
+grep -q "entry missing: $HOME/.agents/AGENTS.md" "$TMP/dot-doctor-missing-entry.out"
+mv "$HOME/.agents/AGENTS.md.saved" "$HOME/.agents/AGENTS.md"
+
+printf '\nlocal wrapper drift\n' >> "$HOME/.claude/CLAUDE.md"
+if "$HOME/.agents/.dotpanel/bin/dot" doctor > "$TMP/dot-doctor-wrapper-drift.out" 2>&1; then
+  echo "FAIL: dot doctor accepted a stale generated wrapper" >&2
+  exit 1
+fi
+grep -q "wrapper differs from generated content: $HOME/.claude/CLAUDE.md" "$TMP/dot-doctor-wrapper-drift.out"
+"$HOME/.agents/.dotpanel/bin/dot" set claude
+
+printf '\ngenerated drift\n' >> "$HOME/.claude/skills/hio/skills/minimal/SKILL.md"
+if "$HOME/.agents/.dotpanel/bin/dot" doctor > "$TMP/dot-doctor-plugin-drift.out" 2>&1; then
+  echo "FAIL: dot doctor accepted stale generated skills" >&2
+  exit 1
+fi
+grep -q "hio plugin differs from source render" "$TMP/dot-doctor-plugin-drift.out"
+"$HOME/.agents/.dotpanel/bin/dot" set claude
+
 "$HOME/.agents/.dotpanel/bin/dot" set -a
 
 grep -qxF '/.dotpanel/' "$HOME/.agents/.gitignore"
@@ -71,9 +96,158 @@ test -f "$HOME/.claude/skills/hio/skills/minimal/SKILL.md"
 test -f "$HOME/.claude/skills/matt/skills/diagnose/SKILL.md"
 test -f "$HOME/.claude/skills/impeccable/skills/impeccable/SKILL.md"
 
-git -C "$HOME/.agents" init >/dev/null
+git -C "$HOME/.agents" init -q -b main
+git -C "$HOME/.agents" config user.name "Dotpanel Tests"
+git -C "$HOME/.agents" config user.email "dotpanel-tests@example.invalid"
+git -C "$HOME/.agents" add .gitignore AGENTS.md skills
+git -C "$HOME/.agents" commit -q -m "test: initial memspace"
 "$HOME/.agents/.dotpanel/bin/dot" sync status >/dev/null
 git -C "$HOME/.agents" status --short --ignored | grep -q '!! .dotpanel/'
+
+git init -q --bare "$TMP/memspace-origin.git"
+git -C "$HOME/.agents" remote add origin "$TMP/memspace-origin.git"
+git -C "$HOME/.agents" push -q -u origin main
+git --git-dir="$TMP/memspace-origin.git" symbolic-ref HEAD refs/heads/main
+printf 'committed\n' > "$HOME/.agents/existing-commit.md"
+git -C "$HOME/.agents" add existing-commit.md
+git -C "$HOME/.agents" commit -q -m "test: existing commit"
+
+printf 'staged\n' > "$HOME/.agents/staged.md"
+git -C "$HOME/.agents" add staged.md
+printf '\nunstaged\n' >> "$HOME/.agents/AGENTS.md"
+printf 'untracked\n' > "$HOME/.agents/untracked.md"
+push_head_before="$(git -C "$HOME/.agents" rev-parse HEAD)"
+push_index_before="$(git -C "$HOME/.agents" ls-files --stage)"
+push_status_before="$(git -C "$HOME/.agents" status --porcelain=v1 --untracked-files=all)"
+remote_head_before="$(git --git-dir="$TMP/memspace-origin.git" rev-parse refs/heads/main)"
+if "$HOME/.agents/.dotpanel/bin/dot" sync push > "$TMP/dot-sync-push-dirty.out" 2>&1; then
+  echo "FAIL: dot sync push accepted a dirty memspace" >&2
+  exit 1
+fi
+grep -q 'memspace has uncommitted changes; commit or stash them before pushing' "$TMP/dot-sync-push-dirty.out"
+test "$(git -C "$HOME/.agents" rev-parse HEAD)" = "$push_head_before"
+test "$(git -C "$HOME/.agents" ls-files --stage)" = "$push_index_before"
+test "$(git -C "$HOME/.agents" status --porcelain=v1 --untracked-files=all)" = "$push_status_before"
+test "$(git --git-dir="$TMP/memspace-origin.git" rev-parse refs/heads/main)" = "$remote_head_before"
+
+git -C "$HOME/.agents" restore --staged staged.md
+rm "$HOME/.agents/staged.md" "$HOME/.agents/untracked.md"
+git -C "$HOME/.agents" restore AGENTS.md
+clean_push_head_before="$(git -C "$HOME/.agents" rev-parse HEAD)"
+clean_push_index_before="$(git -C "$HOME/.agents" ls-files --stage)"
+"$HOME/.agents/.dotpanel/bin/dot" sync push > "$TMP/dot-sync-push-clean.out" 2>&1
+test "$(git --git-dir="$TMP/memspace-origin.git" rev-parse refs/heads/main)" = "$clean_push_head_before"
+test "$(git -C "$HOME/.agents" rev-parse HEAD)" = "$clean_push_head_before"
+test "$(git -C "$HOME/.agents" ls-files --stage)" = "$clean_push_index_before"
+test -z "$(git -C "$HOME/.agents" status --porcelain=v1 --untracked-files=all)"
+
+git clone -q "$TMP/memspace-origin.git" "$TMP/memspace-upstream"
+git -C "$TMP/memspace-upstream" config user.name "Dotpanel Tests"
+git -C "$TMP/memspace-upstream" config user.email "dotpanel-tests@example.invalid"
+printf 'from remote\n' > "$TMP/memspace-upstream/pulled.md"
+git -C "$TMP/memspace-upstream" add pulled.md
+git -C "$TMP/memspace-upstream" commit -q -m "test: remote update"
+git -C "$TMP/memspace-upstream" push -q origin main
+pull_target="$(git -C "$TMP/memspace-upstream" rev-parse HEAD)"
+
+printf 'untracked pull blocker\n' > "$HOME/.agents/pull-dirty.md"
+printf '\nwrapper must not render on refused pull\n' >> "$HOME/.codex/AGENTS.md"
+pull_head_before="$(git -C "$HOME/.agents" rev-parse HEAD)"
+pull_index_before="$(git -C "$HOME/.agents" ls-files --stage)"
+pull_status_before="$(git -C "$HOME/.agents" status --porcelain=v1 --untracked-files=all)"
+if "$HOME/.agents/.dotpanel/bin/dot" sync pull > "$TMP/dot-sync-pull-dirty.out" 2>&1; then
+  echo "FAIL: dot sync pull accepted a dirty memspace" >&2
+  exit 1
+fi
+grep -q '^## main' "$TMP/dot-sync-pull-dirty.out"
+grep -q 'memspace has uncommitted changes; commit or stash them before pulling' "$TMP/dot-sync-pull-dirty.out"
+test "$(git -C "$HOME/.agents" rev-parse HEAD)" = "$pull_head_before"
+test "$(git -C "$HOME/.agents" ls-files --stage)" = "$pull_index_before"
+test "$(git -C "$HOME/.agents" status --porcelain=v1 --untracked-files=all)" = "$pull_status_before"
+test "$(git -C "$HOME/.agents" rev-parse refs/remotes/origin/main)" = "$pull_target"
+grep -q 'wrapper must not render on refused pull' "$HOME/.codex/AGENTS.md"
+
+rm "$HOME/.agents/pull-dirty.md"
+"$HOME/.agents/.dotpanel/bin/dot" sync pull > "$TMP/dot-sync-pull-clean.out" 2>&1
+test "$(git -C "$HOME/.agents" rev-parse HEAD)" = "$pull_target"
+test -f "$HOME/.agents/pulled.md"
+cmp -s "$HOME/.claude/CLAUDE.md" "$HOME/.codex/AGENTS.md"
+"$HOME/.agents/.dotpanel/bin/dot" doctor >/dev/null
+
+printf 'local only\n' > "$HOME/.agents/local-only.md"
+git -C "$HOME/.agents" add local-only.md
+git -C "$HOME/.agents" commit -q -m "test: local divergence"
+printf 'remote only\n' > "$TMP/memspace-upstream/remote-only.md"
+git -C "$TMP/memspace-upstream" add remote-only.md
+git -C "$TMP/memspace-upstream" commit -q -m "test: remote divergence"
+git -C "$TMP/memspace-upstream" push -q origin main
+diverged_remote_head="$(git -C "$TMP/memspace-upstream" rev-parse HEAD)"
+printf '\nwrapper must not render on non-fast-forward pull\n' >> "$HOME/.kimi/AGENTS.md"
+diverged_local_head="$(git -C "$HOME/.agents" rev-parse HEAD)"
+diverged_local_index="$(git -C "$HOME/.agents" ls-files --stage)"
+if "$HOME/.agents/.dotpanel/bin/dot" sync pull > "$TMP/dot-sync-pull-diverged.out" 2>&1; then
+  echo "FAIL: dot sync pull merged diverged branches" >&2
+  exit 1
+fi
+test "$(git -C "$HOME/.agents" rev-parse HEAD)" = "$diverged_local_head"
+test "$(git -C "$HOME/.agents" ls-files --stage)" = "$diverged_local_index"
+test -z "$(git -C "$HOME/.agents" status --porcelain=v1 --untracked-files=all)"
+test "$(git -C "$HOME/.agents" rev-parse refs/remotes/origin/main)" = "$diverged_remote_head"
+grep -q 'wrapper must not render on non-fast-forward pull' "$HOME/.kimi/AGENTS.md"
+"$HOME/.agents/.dotpanel/bin/dot" set kimi >/dev/null
+
+cat > "$HOME/.agents/.dotpanel/.gitignore" <<'EOF'
+/env.sh
+/var/
+EOF
+git -C "$HOME/.agents/.dotpanel" init -q -b main
+git -C "$HOME/.agents/.dotpanel" config user.name "Dotpanel Tests"
+git -C "$HOME/.agents/.dotpanel" config user.email "dotpanel-tests@example.invalid"
+git -C "$HOME/.agents/.dotpanel" add .gitignore bin
+git -C "$HOME/.agents/.dotpanel" commit -q -m "test: installed dotpanel"
+git init -q --bare "$TMP/dotpanel-origin.git"
+git -C "$HOME/.agents/.dotpanel" remote add origin "$TMP/dotpanel-origin.git"
+git -C "$HOME/.agents/.dotpanel" push -q -u origin main
+git --git-dir="$TMP/dotpanel-origin.git" symbolic-ref HEAD refs/heads/main
+git clone -q "$TMP/dotpanel-origin.git" "$TMP/dotpanel-upstream"
+git -C "$TMP/dotpanel-upstream" config user.name "Dotpanel Tests"
+git -C "$TMP/dotpanel-upstream" config user.email "dotpanel-tests@example.invalid"
+printf 'remote dotpanel update\n' > "$TMP/dotpanel-upstream/remote-update.md"
+git -C "$TMP/dotpanel-upstream" add remote-update.md
+git -C "$TMP/dotpanel-upstream" commit -q -m "test: remote dotpanel update"
+git -C "$TMP/dotpanel-upstream" push -q origin main
+self_update_target="$(git -C "$TMP/dotpanel-upstream" rev-parse HEAD)"
+
+printf 'staged self change\n' > "$HOME/.agents/.dotpanel/staged-self.md"
+git -C "$HOME/.agents/.dotpanel" add staged-self.md
+printf '\n# unstaged self change\n' >> "$HOME/.agents/.dotpanel/bin/dot"
+printf 'untracked self change\n' > "$HOME/.agents/.dotpanel/untracked-self.md"
+self_head_before="$(git -C "$HOME/.agents/.dotpanel" rev-parse HEAD)"
+self_index_before="$(git -C "$HOME/.agents/.dotpanel" ls-files --stage)"
+self_status_before="$(git -C "$HOME/.agents/.dotpanel" status --porcelain=v1 --untracked-files=all)"
+self_tracking_before="$(git -C "$HOME/.agents/.dotpanel" rev-parse refs/remotes/origin/main)"
+if "$HOME/.agents/.dotpanel/bin/dot" self update > "$TMP/dot-self-update-dirty.out" 2>&1; then
+  echo "FAIL: dot self update accepted a dirty managed checkout" >&2
+  exit 1
+fi
+grep -q 'dotpanel checkout has uncommitted changes; commit or stash them before updating' "$TMP/dot-self-update-dirty.out"
+test "$(git -C "$HOME/.agents/.dotpanel" rev-parse HEAD)" = "$self_head_before"
+test "$(git -C "$HOME/.agents/.dotpanel" ls-files --stage)" = "$self_index_before"
+test "$(git -C "$HOME/.agents/.dotpanel" status --porcelain=v1 --untracked-files=all)" = "$self_status_before"
+test "$(git -C "$HOME/.agents/.dotpanel" rev-parse refs/remotes/origin/main)" = "$self_tracking_before"
+
+git -C "$HOME/.agents/.dotpanel" restore --staged staged-self.md
+rm "$HOME/.agents/.dotpanel/staged-self.md" "$HOME/.agents/.dotpanel/untracked-self.md"
+git -C "$HOME/.agents/.dotpanel" restore bin/dot
+"$HOME/.agents/.dotpanel/bin/dot" self update > "$TMP/dot-self-update-clean.out" 2>&1
+test "$(git -C "$HOME/.agents/.dotpanel" rev-parse HEAD)" = "$self_update_target"
+test -f "$HOME/.agents/.dotpanel/remote-update.md"
+test -z "$(git -C "$HOME/.agents/.dotpanel" status --porcelain=v1 --untracked-files=all)"
+
+if [ "${DOT_ONLY:-0}" = "1" ]; then
+  echo "OK (dot only)"
+  exit 0
+fi
 
 "$HOME/.agents/.dotpanel/bin/dkey" init
 "$HOME/.agents/.dotpanel/bin/dkey" status | grep -q 'active grant: none'

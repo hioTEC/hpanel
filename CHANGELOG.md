@@ -22,6 +22,14 @@
   sections — install from source.
 
 ### Fixed
+- `dot sync push` no longer stages or commits memspace changes. It now refuses
+  dirty worktrees and pushes existing commits only.
+- `dot sync pull` now reports status, fetches, enforces clean-worktree and
+  fast-forward-only gates, and renders harness outputs only after success.
+- `dot self update` now refuses dirty managed checkouts before pulling.
+- `dot doctor` now exits non-zero for a missing memspace entry, any wrapper
+  content drift, or generated Claude plugins that differ from their source
+  render.
 - jq 1.8.1 compatibility in `write_claude_use`.
 
 ## 0.0.1 — 2026-05-14

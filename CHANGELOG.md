@@ -70,8 +70,14 @@
   of partially removing managed provider state.
 - Sensitive identity/encrypted-key targets must be absolute, lexically
   normalized regular files below non-symlinked mutation boundaries. Directory,
-  symlink, and initially-absent targets that appear during work are refused;
-  `--force` does not authorize replacing a target that appeared mid-operation.
+  symlink (including outside-HOME ancestor symlinks), and initially-absent
+  targets that appear during work are refused; `--force` does not authorize
+  replacing a target that appeared mid-operation.
+- Generated wrapper/env files and doctor comparisons now use checked random
+  runtime scratch files with exit/signal cleanup instead of predictable PID
+  paths that could be preplanted as symlinks.
+- Codex reset also rejects the unsupported `[model_providers]` root table and
+  escaped `model_provider` values before any partial rewrite can occur.
 - `dot doctor` now exits non-zero for a missing memspace entry, wrapper or
   `env.sh` drift, unsafe generated-file types, or generated Claude plugins that
   differ from their source render. `dkey doctor` uses the same versioned schema

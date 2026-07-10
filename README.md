@@ -239,9 +239,10 @@ dkey list
 random `0600` files and remove them on success, failure, or HUP/INT/TERM. The
 encrypted keys or identity target is replaced only after validation succeeds.
 Sensitive target overrides must be absolute and lexically normalized;
-directories, symlinks, and symlinked mutation boundaries are refused. `dkey
-doctor` applies the same path checks and rejects age identities exposed to
-group or other users.
+directories, symlinks, and every symlinked ancestor up to the applicable
+boundary are refused. Outside-`HOME` overrides therefore need physical paths,
+not aliases such as a symlinked `/tmp`. `dkey doctor` applies the same path
+checks and rejects age identities exposed to group or other users.
 
 The implementation is portable POSIX shell: it revalidates immediately before
 the final rename, but cannot make validation plus rename descriptor-relative.

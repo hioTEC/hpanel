@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 
 YAML_SITE_PACKAGES="$(python3 -c 'from pathlib import Path; import yaml; print(Path(yaml.__file__).resolve().parents[1])')"
@@ -32,6 +33,40 @@ cmp -s "$template_home/.agents/AGENTS.md" "$fallback_home/.agents/AGENTS.md"
 grep -q 'Add a route only after its target' "$template_home/.agents/AGENTS.md"
 
 sh "$HOME/.agents/.dotpanel/bin/dot" init --yes
+
+printf 'outside wrapper scratch sentinel\n' > "$TMP/outside-wrapper-scratch"
+printf 'outside env scratch sentinel\n' > "$TMP/outside-env-scratch"
+cp "$TMP/outside-wrapper-scratch" "$TMP/outside-wrapper-scratch-before"
+cp "$TMP/outside-env-scratch" "$TMP/outside-env-scratch-before"
+mkdir -p "$TMP/dot-scratch-preplant-bin"
+cat > "$TMP/dot-scratch-preplant-bin/mkdir" <<'SH'
+#!/bin/sh
+if [ ! -e "$DOT_TEST_SCRATCH_MARKER" ]; then
+  /bin/mkdir -p "$DOT_TEST_SCRATCH_VAR" || exit 1
+  wrapper_path="$DOT_TEST_SCRATCH_VAR/wrapper.kimi.$PPID"
+  env_path="$DOT_TEST_SCRATCH_VAR/env.$PPID"
+  /bin/ln -s "$DOT_TEST_SCRATCH_WRAPPER_OUTSIDE" "$wrapper_path" || exit 1
+  /bin/ln -s "$DOT_TEST_SCRATCH_ENV_OUTSIDE" "$env_path" || exit 1
+  printf '%s\n%s\n' "$wrapper_path" "$env_path" > "$DOT_TEST_SCRATCH_PATHS"
+  : > "$DOT_TEST_SCRATCH_MARKER"
+fi
+exec /bin/mkdir "$@"
+SH
+chmod +x "$TMP/dot-scratch-preplant-bin/mkdir"
+DOT_TEST_SCRATCH_MARKER="$TMP/dot-scratch-preplant-triggered" \
+DOT_TEST_SCRATCH_PATHS="$TMP/dot-scratch-preplant-paths" \
+DOT_TEST_SCRATCH_VAR="$HOME/.agents/.dotpanel/var" \
+DOT_TEST_SCRATCH_WRAPPER_OUTSIDE="$TMP/outside-wrapper-scratch" \
+DOT_TEST_SCRATCH_ENV_OUTSIDE="$TMP/outside-env-scratch" \
+PATH="$TMP/dot-scratch-preplant-bin:$PATH" \
+  "$HOME/.agents/.dotpanel/bin/dot" set kimi >/dev/null
+cmp -s "$TMP/outside-wrapper-scratch-before" "$TMP/outside-wrapper-scratch"
+cmp -s "$TMP/outside-env-scratch-before" "$TMP/outside-env-scratch"
+while IFS= read -r scratch_path; do
+  test -L "$scratch_path"
+  rm "$scratch_path"
+done < "$TMP/dot-scratch-preplant-paths"
+rm -rf "$TMP/dot-scratch-preplant-bin"
 
 dot_env_line="[ -f \"$HOME/.agents/.dotpanel/env.sh\" ] && . \"$HOME/.agents/.dotpanel/env.sh\""
 printf 'outside shell rc target\n%s\n' "$dot_env_line" > "$TMP/outside-shell-rc"
@@ -805,6 +840,40 @@ mv "$TMP/sources-no-escape.json" "$HOME/.agents/skills/sources.json"
 . "$HOME/.agents/.dotpanel/env.sh"
 "$HOME/.agents/.dotpanel/bin/dot" doctor
 
+printf 'outside doctor wrapper sentinel\n' > "$TMP/outside-doctor-wrapper"
+printf 'outside doctor env sentinel\n' > "$TMP/outside-doctor-env"
+cp "$TMP/outside-doctor-wrapper" "$TMP/outside-doctor-wrapper-before"
+cp "$TMP/outside-doctor-env" "$TMP/outside-doctor-env-before"
+mkdir -p "$TMP/dot-doctor-scratch-bin"
+cat > "$TMP/dot-doctor-scratch-bin/mkdir" <<'SH'
+#!/bin/sh
+if [ ! -e "$DOT_TEST_DOCTOR_SCRATCH_MARKER" ]; then
+  /bin/mkdir -p "$DOT_TEST_DOCTOR_SCRATCH_VAR" || exit 1
+  wrapper_path="$DOT_TEST_DOCTOR_SCRATCH_VAR/doctor-wrapper.$PPID"
+  env_path="$DOT_TEST_DOCTOR_SCRATCH_VAR/doctor-env.$PPID"
+  /bin/ln -s "$DOT_TEST_DOCTOR_WRAPPER_OUTSIDE" "$wrapper_path" || exit 1
+  /bin/ln -s "$DOT_TEST_DOCTOR_ENV_OUTSIDE" "$env_path" || exit 1
+  printf '%s\n%s\n' "$wrapper_path" "$env_path" > "$DOT_TEST_DOCTOR_SCRATCH_PATHS"
+  : > "$DOT_TEST_DOCTOR_SCRATCH_MARKER"
+fi
+exec /bin/mkdir "$@"
+SH
+chmod +x "$TMP/dot-doctor-scratch-bin/mkdir"
+DOT_TEST_DOCTOR_SCRATCH_MARKER="$TMP/dot-doctor-scratch-triggered" \
+DOT_TEST_DOCTOR_SCRATCH_PATHS="$TMP/dot-doctor-scratch-paths" \
+DOT_TEST_DOCTOR_SCRATCH_VAR="$HOME/.agents/.dotpanel/var" \
+DOT_TEST_DOCTOR_WRAPPER_OUTSIDE="$TMP/outside-doctor-wrapper" \
+DOT_TEST_DOCTOR_ENV_OUTSIDE="$TMP/outside-doctor-env" \
+PATH="$TMP/dot-doctor-scratch-bin:$PATH" \
+  "$HOME/.agents/.dotpanel/bin/dot" doctor >/dev/null
+cmp -s "$TMP/outside-doctor-wrapper-before" "$TMP/outside-doctor-wrapper"
+cmp -s "$TMP/outside-doctor-env-before" "$TMP/outside-doctor-env"
+while IFS= read -r scratch_path; do
+  test -L "$scratch_path"
+  rm "$scratch_path"
+done < "$TMP/dot-doctor-scratch-paths"
+rm -rf "$TMP/dot-doctor-scratch-bin"
+
 printf '\nCodex alias drift\n' >> "$HOME/.codex/skills/review/SKILL.md"
 if "$HOME/.agents/.dotpanel/bin/dot" doctor > "$TMP/dot-doctor-codex-alias-drift.out" 2>&1; then
   echo "FAIL: dot doctor accepted stale generated Codex alias content" >&2
@@ -1279,6 +1348,31 @@ SH
   fi
   grep -q 'age identity must not be symlinked' "$TMP/dkey-identity-symlink-directory.out"
   test -z "$(find "$TMP/identity-symlink-outside" -mindepth 1 -print -quit)"
+
+  mkdir -p "$TMP/sensitive-ancestor-real/nested"
+  ln -s "$TMP/sensitive-ancestor-real" "$TMP/sensitive-ancestor-link"
+  if DKEY_AGE_IDENTITY_FILE="$TMP/sensitive-ancestor-link/nested/identity.txt" \
+      "$HOME/.agents/.dotpanel/bin/dkey" identity import "$HOME/.config/age/key.txt" --force \
+      > "$TMP/dkey-identity-ancestor-symlink.out" 2>&1; then
+    echo "FAIL: dkey identity import traversed an outside-HOME ancestor symlink" >&2
+    exit 1
+  fi
+  grep -q 'age identity path contains a symlink' "$TMP/dkey-identity-ancestor-symlink.out"
+  test ! -e "$TMP/sensitive-ancestor-real/nested/identity.txt"
+  if DKEY_KEYS_FILE="$TMP/sensitive-ancestor-link/nested/keys.env.age" \
+      "$HOME/.agents/.dotpanel/bin/dkey" set ANCESTOR_SECRET synthetic \
+      > "$TMP/dkey-keys-ancestor-symlink.out" 2>&1; then
+    echo "FAIL: dkey set traversed an outside-HOME ancestor symlink" >&2
+    exit 1
+  fi
+  grep -q 'encrypted keys path contains a symlink' "$TMP/dkey-keys-ancestor-symlink.out"
+  test ! -e "$TMP/sensitive-ancestor-real/nested/keys.env.age"
+  if DKEY_AGE_IDENTITY_FILE="$TMP/sensitive-ancestor-link/nested/identity.txt" \
+      "$HOME/.agents/.dotpanel/bin/dkey" doctor > "$TMP/dkey-doctor-ancestor-symlink.out" 2>&1; then
+    echo "FAIL: dkey doctor accepted an outside-HOME ancestor symlink" >&2
+    exit 1
+  fi
+  grep -q 'age identity path contains a symlink' "$TMP/dkey-doctor-ancestor-symlink.out"
 
   mkdir -p "$TMP/keys-directory-target" "$TMP/keys-symlink-outside"
   if DKEY_KEYS_FILE="$TMP/keys-directory-target" \
@@ -1899,6 +1993,38 @@ TOML
     cmp -s "$TMP/dotted-provider-variant-before.toml" "$HOME/.codex/config.toml"
     cmp -s "$TMP/dotted-provider-variant-auth-before.json" "$HOME/.codex/auth.json"
   done
+  cat > "$HOME/.codex/config.toml" <<'TOML'
+model_provider = "ok"
+model = "managed-model"
+[model_providers]
+ok = { name = "Managed", base_url = "https://managed.invalid/v1" }
+TOML
+  printf '{"auth_mode":"apikey","OPENAI_API_KEY":"legacy-placeholder"}\n' > "$HOME/.codex/auth.json"
+  cp "$HOME/.codex/config.toml" "$TMP/provider-root-table-before.toml"
+  cp "$HOME/.codex/auth.json" "$TMP/provider-root-table-auth-before.json"
+  if "$HOME/.agents/.dotpanel/bin/dkey" reset codex > "$TMP/dkey-reset-provider-root-table.out" 2>&1; then
+    echo "FAIL: dkey reset partially rewrote a model_providers root table" >&2
+    exit 1
+  fi
+  grep -q 'refusing unsupported Codex TOML table/bracket syntax' "$TMP/dkey-reset-provider-root-table.out"
+  cmp -s "$TMP/provider-root-table-before.toml" "$HOME/.codex/config.toml"
+  cmp -s "$TMP/provider-root-table-auth-before.json" "$HOME/.codex/auth.json"
+  cat > "$HOME/.codex/config.toml" <<'TOML'
+model_provider = "\u006f\u006b"
+model = "managed-model"
+[model_providers.ok]
+name = "Managed"
+TOML
+  printf '{"auth_mode":"apikey","OPENAI_API_KEY":"legacy-placeholder"}\n' > "$HOME/.codex/auth.json"
+  cp "$HOME/.codex/config.toml" "$TMP/escaped-provider-value-before.toml"
+  cp "$HOME/.codex/auth.json" "$TMP/escaped-provider-value-auth-before.json"
+  if "$HOME/.agents/.dotpanel/bin/dkey" reset codex > "$TMP/dkey-reset-escaped-provider-value.out" 2>&1; then
+    echo "FAIL: dkey reset partially rewrote an escaped model_provider value" >&2
+    exit 1
+  fi
+  grep -q 'refusing unsupported Codex TOML table/bracket syntax' "$TMP/dkey-reset-escaped-provider-value.out"
+  cmp -s "$TMP/escaped-provider-value-before.toml" "$HOME/.codex/config.toml"
+  cmp -s "$TMP/escaped-provider-value-auth-before.json" "$HOME/.codex/auth.json"
   cat > "$HOME/.codex/config.toml" <<'TOML'
 model_provider = "ok"
 model = "managed-model"

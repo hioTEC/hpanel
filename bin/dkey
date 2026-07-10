@@ -98,30 +98,26 @@ validate_sensitive_target_path() {
         warn "$sensitive_label parent is not a directory: $sensitive_parent"
         return 1
     fi
+    sensitive_boundary="/"
     case "$sensitive_target" in
         "$HOME_DIR"/*)
             [ ! -L "$HOME_DIR" ] || {
                 warn "$sensitive_label HOME boundary must not be symlinked: $HOME_DIR"
                 return 1
             }
-            sensitive_cursor="$sensitive_target"
-            while [ "$sensitive_cursor" != "$HOME_DIR" ]; do
-                [ ! -L "$sensitive_cursor" ] || {
-                    warn "$sensitive_label path contains a symlink: $sensitive_cursor"
-                    return 1
-                }
-                sensitive_next="$(dirname "$sensitive_cursor")" || return 1
-                [ "$sensitive_next" != "$sensitive_cursor" ] || return 1
-                sensitive_cursor="$sensitive_next"
-            done
-            ;;
-        *)
-            [ ! -L "$sensitive_parent" ] || {
-                warn "$sensitive_label parent must not be symlinked: $sensitive_parent"
-                return 1
-            }
+            sensitive_boundary="$HOME_DIR"
             ;;
     esac
+    sensitive_cursor="$sensitive_target"
+    while [ "$sensitive_cursor" != "$sensitive_boundary" ]; do
+        [ ! -L "$sensitive_cursor" ] || {
+            warn "$sensitive_label path contains a symlink: $sensitive_cursor"
+            return 1
+        }
+        sensitive_next="$(dirname "$sensitive_cursor")" || return 1
+        [ "$sensitive_next" != "$sensitive_cursor" ] || return 1
+        sensitive_cursor="$sensitive_next"
+    done
 }
 
 DKEY_SENSITIVE_ACTIVE=0
@@ -810,6 +806,28 @@ reset_cmd() {
                         substr(compact, 1, 1) == sprintf("%c", 39)) {
                         invalid = 1
                     }
+                    if (!in_table && compact ~ /^model_provider=/) {
+                        candidate = $0
+                        sub(/^[[:space:]]*model_provider[[:space:]]*=[[:space:]]*/, "", candidate)
+                        quote = substr(candidate, 1, 1)
+                        if (quote != "\"" && quote != sprintf("%c", 39)) {
+                            invalid = 1
+                        } else {
+                            remainder = substr(candidate, 2)
+                            closing = index(remainder, quote)
+                            if (closing == 0) {
+                                invalid = 1
+                            } else {
+                                provider_value = substr(remainder, 1, closing - 1)
+                                tail = substr(remainder, closing + 1)
+                                sub(/^[[:space:]]*/, "", tail)
+                                if (provider_value !~ /^[A-Za-z0-9_-]+$/ ||
+                                    (tail != "" && substr(tail, 1, 1) != "#")) {
+                                    invalid = 1
+                                }
+                            }
+                        }
+                    }
                 }
                 /^[[:space:]]*\[/ { in_table = 1 }
                 /^[[:space:]]*\[\[/ { invalid = 1 }
@@ -819,6 +837,7 @@ reset_cmd() {
                     $0 !~ /^[[:space:]]*\[[A-Za-z0-9_.-]+\][[:space:]]*(#.*)?$/ {
                     invalid = 1
                 }
+                /^[[:space:]]*\[model_providers\][[:space:]]*(#.*)?$/ { invalid = 1 }
                 !in_table {
                     candidate = $0
                     sub(/^[[:space:]]*/, "", candidate)

@@ -231,8 +231,10 @@ dkey list
 `dkey set`、`dkey edit` 和 identity import 的敏感中间内容只写入随机 `0600`
 temp，并在 success、failure 或 HUP/INT/TERM 后清理；只有验证成功后才替换 encrypted
 keys 或 identity target。敏感 target override 必须是绝对、词法规范化的路径；
-directory、symlink 和带 symlink 的 mutation boundary 都会被拒绝。`dkey doctor`
-使用同一组路径检查，并拒绝对 group/other 开放的 age identity。
+directory、symlink 以及直到适用 boundary 的任意 symlink ancestor 都会被拒绝。
+因此 `HOME` 外 override 要使用 physical path，不能使用带 symlink 的 `/tmp` 等
+alias。`dkey doctor` 使用同一组路径检查，并拒绝对 group/other 开放的 age
+identity。
 
 实现保持 portable POSIX shell：最终 rename 前会再次校验，但无法把“校验 + rename”
 变成 descriptor-relative 的单一操作。执行 mutation 时，不要让同一用户下的其他

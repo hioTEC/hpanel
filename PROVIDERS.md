@@ -41,12 +41,12 @@ codx example "prompt"
 
 | Key | Type | Required | Description |
 |---|---|---|---|
-| `defaults.claude.settings_path` | string | no | Path to Claude settings JSON (default `~/.claude/settings.json`). |
+| `defaults.claude.settings_path` | string | no | Path to Claude settings JSON (default `~/.claude/settings.json`); reset requires the expanded path below `HOME` with no symlinked component. |
 | `defaults.claude.home_path` | string | no | Path to Claude home JSON (default `~/.claude.json`). |
 | `defaults.claude.home` | object | no | Default values merged into `~/.claude.json`. |
-| `defaults.claude.settings.env` | object | no | Default env vars merged into settings. |
-| `defaults.claude.managed_env_keys` | []string | no | Legacy field kept for old registries; wrappers do not write global settings. |
-| `defaults.codex.config_path` | string | no | Path to Codex config TOML (default `~/.codex/config.toml`). |
+| `defaults.claude.settings.env` | object | no | Registry-managed default env vars. Their keys are removed by `dkey reset claude|all`. |
+| `defaults.claude.managed_env_keys` | []string | no | Additional legacy managed keys removed by reset; wrappers do not write global settings. |
+| `defaults.codex.config_path` | string | no | Path to Codex config TOML (default `~/.codex/config.toml`); reset requires the expanded path below `HOME` with no symlinked component. |
 
 ### `providers.<name>`
 

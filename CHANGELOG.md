@@ -7,6 +7,8 @@
   Use per-invocation wrappers (`claw`/`clawb`, `codx`/`codxb`, `gem`/`gemb`)
   instead; they read `dkey.providers.json` and load secrets through grants
   without rewriting global harness config or Codex auth state.
+- **Breaking:** unscoped `dkey on` activation is disabled. Current-shell
+  activation now requires one or more `--with GRANT` scopes.
 
 ### Added
 - Optional Codex skill alias rendering from `~/.agents/skills/sources.json`.
@@ -32,10 +34,29 @@
 - `dot sync pull` now reports status, fetches, enforces clean-worktree and
   fast-forward-only gates, recursively initializes/updates submodules, and
   renders harness outputs only after success.
+- Multi-harness rendering prepares Claude plugins and Codex aliases, including
+  ownership collision checks, before changing generated state. A missing alias
+  manifest now reconciles the dot-managed alias set to empty.
+- Claude plugin rendering now validates source containment/frontmatter, rejects
+  symlinked trees, and uses `.dotpanel-owner` for safe migration, reconciliation,
+  doctor, and unset behavior.
+- `dkey reset` removes only registry-owned backend state, preserves unrelated
+  provider/OAuth configuration, requires target paths below `HOME` with no
+  symlinked component, uses random sibling temp files, and validates all
+  replacement inputs before target files are changed.
+- Grant-scoped shell activation now uses exact grant lookup and validates every
+  emitted env/secret name before generated shell code can be evaluated. Current
+  shell activation/removal is preflighted and refuses repeated activation or
+  reserved shell-control variables.
 - `dot self update` now refuses dirty managed checkouts before pulling.
-- `dot doctor` now exits non-zero for a missing memspace entry, any wrapper
-  content drift, or generated Claude plugins that differ from their source
-  render.
+- Render/reset signal handlers now clean staging and terminate with the signal
+  status instead of resuming a cancelled mutation.
+- Codex alias apply rechecks ownership after preflight; a concurrent unmanaged
+  replacement is preserved and fails closed.
+- `dot doctor` now exits non-zero for a missing memspace entry, wrapper or
+  `env.sh` drift, unsafe generated-file types, or generated Claude plugins that
+  differ from their source render. `dkey doctor` uses the same versioned schema
+  as reset and treats missing operational inputs as failures.
 - jq 1.8.1 compatibility in `write_claude_use`.
 
 ## 0.0.1 — 2026-05-14

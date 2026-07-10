@@ -35,8 +35,9 @@ Follow the user's direct instructions first.
 task is about dotpanel itself.
 
 `dkey` is privileged. Subagents must refuse any `dkey` invocation or wrapper
-known to use it. `dkey on` exports all encrypted keys into the current shell;
-prefer grant-scoped forms for resource operations when practical.
+known to use it. Unscoped `dkey on` is disabled. Main-agent credential use
+requires `dkey run --with GRANT -- ...`, or `dkey on --with GRANT` only for an
+authorized interactive tool. Run `dkey off` before activating another grant.
 
 Never output secret values in logs or responses.
 
@@ -57,8 +58,8 @@ and pushes existing commits only; it never stages or commits files.
 
 Use `dkey keygen` once to create the local age identity. Use
 `dkey set NAME VALUE` or `dkey set NAME=VALUE` to create or overwrite encrypted
-keys, `dkey list` to list key names, `dkey on` to export all keys to the
-current shell, and `dkey off` to remove variables set by `dkey on`.
+keys, `dkey list` to list key names, `dkey on --with GRANT` for a scoped current
+shell, and `dkey off` to remove variables set by `dkey on`.
 
 ## Layout
 

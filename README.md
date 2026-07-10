@@ -120,7 +120,8 @@ untracked files and never stages or commits them. Commit the exact paths you
 intend to share before running it. `dot sync pull` prints status, fetches, then
 requires a clean worktree and a fast-forward path. After the fast-forward it
 recursively initializes/updates submodules. Harness files are rendered only
-after those steps succeed.
+after those steps succeed. Requested Claude/Codex skill renders and ownership
+collisions are prepared before any generated harness state is changed.
 
 Switch AI backends per invocation (reads `~/.agents/secrets/dkey.providers.json`
 and injects keys with the `llm-backends` grant when needed):
@@ -147,12 +148,19 @@ dot self update
 - `dot set` renders minimal harness entry files from `~/.agents/AGENTS.md`.
 - `dot sync` runs git operations in `~/.agents`.
 - `dot self` runs git operations in `~/.agents/.dotpanel`.
-- `dot doctor` checks that the entry exists and generated wrappers, Claude
-  plugins, and declared Codex aliases exactly match their source render. These
-  coherence failures return a non-zero status.
+- `dot doctor` checks that the entry exists and generated wrappers, shell
+  integration, Claude plugins, and declared Codex aliases exactly match their
+  source render. Symlinked/non-regular generated files and coherence failures
+  return a non-zero status.
 
 Rendered harness entries are deliberately tiny. They tell the harness to read
 `~/.agents/AGENTS.md`; they do not duplicate your private rules.
+
+Claude plugin rendering accepts only path-safe skill IDs, closed frontmatter
+with one `name` and `description`, and source trees without symlinks. Generated
+plugins carry a regular `.dotpanel-owner` marker. Reconciliation, doctor, and
+unset use that marker; an exact legacy dot render without the marker is migrated
+once, while unmanaged destinations are never overwritten or deleted.
 
 ### Optional Codex skill aliases
 
@@ -189,8 +197,9 @@ The adapter is enabled only when the manifest is a regular, non-symlinked file
 and `owner`, `destination`, and `renderer` exactly match the values above.
 
 Each referenced alias source must resolve to exactly one relative directory
-inside the memspace and the declared source directory itself must not be a
-symlink. Its target must be a regular, non-symlinked file inside that source.
+below the memspace's `skills/` root, and neither that root nor the declared
+source directory itself may be a symlink. Its target must be a regular,
+non-symlinked file inside that source; aliases can never route into `secrets/`.
 Every alias supplies its own one-line `description` and may add one-line
 alias-specific `guidance`; each is capped at 500 characters. Control characters
 and multiline values are rejected. The generated
@@ -203,7 +212,10 @@ directories only when they carry the banner, and leaves all unrelated Codex
 skills untouched. `dot unset codex` follows the same ownership rule.
 `dot doctor` reports missing aliases, content drift, and stale dot-managed
 aliases.
-Without the manifest, normal Codex entry rendering remains unchanged.
+An absent manifest means the desired alias set is empty. The next
+`dot set codex` removes stale aliases carrying dotpanel's ownership banner and
+leaves unmanaged Codex skills untouched; normal Codex entry rendering still
+continues.
 
 ## What `dkey` Does
 
@@ -230,8 +242,12 @@ dkey status
 dkey off
 ```
 
-`dkey on` changes only the current shell. Direct `command dkey on` refuses to
-print secret-bearing shell code; use the shell function installed by `dot init`.
+`dkey on --with GRANT` changes only the current shell. Unscoped activation is
+disabled, and an active grant must be removed with `dkey off` before another is
+activated. Activation and removal are preflighted in a subshell so readonly or
+tampered control variables do not leave untracked partial state. Direct
+`command dkey on` refuses to print secret-bearing shell code; use the shell
+function installed by `dot init`.
 
 AI backend definitions live in `~/.agents/secrets/dkey.providers.json`.
 `claw`/`clawb`, `codx`/`codxb`, and `gem`/`gemb` read that registry and apply
@@ -246,6 +262,16 @@ clawb kimi "prompt"
 `dkey use` has been removed because it persisted global harness settings and
 could overwrite Codex ChatGPT/OAuth login state with API-key mode. Use
 `dkey reset codex|claude|all` only to clear old persisted backend settings.
+Reset is ownership-aware and conservative: Claude reset removes only
+registry-declared managed env keys; Codex reset removes registry-managed
+provider sections and clears the legacy API-key auth override only when the
+active top-level provider is registry-managed. User-owned providers, unrelated
+settings, and OAuth token fields are preserved. Inputs are validated and
+prepared before any target is replaced; this is not a cross-file transaction
+against filesystem failures. Reset refuses multiline TOML and provider-table
+forms outside the conservative legacy subset instead of partially rewriting
+them. Reset target paths must stay below `HOME`, and every path component from
+the home boundary to the target must be non-symlinked.
 See [PROVIDERS.md](PROVIDERS.md) for the provider schema and a template at
 `templates/secrets/dkey.providers.example.json`.
 
@@ -257,6 +283,7 @@ See [PROVIDERS.md](PROVIDERS.md) for the provider schema and a template at
 - `~/.claude/CLAUDE.md`
 - `~/.codex/AGENTS.md`
 - `~/.kimi/AGENTS.md`
+- `~/.claude/skills/{hio,matt,impeccable}/` with a `.dotpanel-owner` marker
 - `~/.codex/skills/<alias>/SKILL.md` when declared by
   `~/.agents/skills/sources.json`
 
@@ -275,8 +302,10 @@ See [PROVIDERS.md](PROVIDERS.md) for the provider schema and a template at
 - `dot sync push` refuses a dirty memspace and pushes existing commits only; it
   never stages or commits files.
 - `dot sync pull` fetches before its clean-worktree and fast-forward-only gates,
-  then recursively initializes/updates submodules; harness files are rendered
-  only after all updates succeed.
+  then recursively initializes/updates submodules. If render preparation fails
+  after a successful fast-forward, Git stays at the pulled commit while the
+  prior generated snapshot remains; fix the source, rerun `dot set -a`, and
+  verify with `dot doctor`.
 - `dot self update` refuses a dirty managed checkout.
 - `dkey` is privileged; do not use it from subagents or scripts that should not
   see secrets.

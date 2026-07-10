@@ -118,7 +118,9 @@ dot sync push
 untracked files，它就会拒绝执行；它绝不会替你 stage 或 commit。请先明确
 commit 要分享的路径，再运行这个命令。`dot sync pull` 会先显示 status 并
 fetch，然后要求 worktree clean 且可以 fast-forward，再递归初始化/更新
-submodules；只有这些步骤全部成功后才重新渲染 harness files。
+submodules；只有这些步骤全部成功后才重新渲染 harness files。requested
+Claude/Codex skill render 与 ownership collision 会在任何 generated harness
+state 改变前完成 prepare。
 
 按单次调用切换 AI backend（读取 `~/.agents/secrets/dkey.providers.json`，
 需要 key 时通过 `llm-backends` grant 注入）：
@@ -145,12 +147,17 @@ dot self update
 - `dot set` 从 `~/.agents/AGENTS.md` 渲染最小 harness entry。
 - `dot sync` 在 `~/.agents` 里执行 git 同步。
 - `dot self` 在 `~/.agents/.dotpanel` 里执行 git 同步。
-- `dot doctor` 检查 entry 是否存在，以及生成的 wrappers、Claude plugins 和
-  declared Codex aliases 是否与 source render 完全一致；这些一致性错误会
-  返回非零状态。
+- `dot doctor` 检查 entry 是否存在，以及生成的 wrappers、shell integration、
+  Claude plugins 和 declared Codex aliases 是否与 source render 完全一致；
+  symlinked/non-regular generated file 与这些一致性错误都会返回非零状态。
 
 渲染出来的 harness entry 故意很小。它们只告诉 harness 去读
 `~/.agents/AGENTS.md`，不会复制你的私有规则。
+
+Claude plugin renderer 只接受 path-safe skill ID、恰好一组 `name` / `description`
+且已闭合的 frontmatter，以及不含 symlink 的 source tree。生成目录带普通文件
+`.dotpanel-owner`；reconcile、doctor 和 unset 都依赖该 marker。完全匹配旧版 dot
+render 的无 marker 目录会迁移一次，unmanaged destination 永远不会被覆盖或删除。
 
 ### 可选的 Codex skill aliases
 
@@ -186,9 +193,10 @@ dot self update
 只有 manifest 本身是普通、非 symlink 文件，且 `owner`、`destination` 和
 `renderer` 与上例完全一致时才启用 adapter。
 
-每个被 alias 引用的 source 必须解析为 memspace 内唯一的相对目录，而且
-declared source directory 本身不能是 symlink；target 必须是该 source 内普通且
-非 symlink 的文件。每个 alias 必须提供单行 `description`，也可以提供单行
+每个被 alias 引用的 source 必须解析为 memspace 的 `skills/` root 下唯一的相对
+目录，而且该 root 与 declared source directory 都不能是 symlink；target 必须是
+该 source 内普通且非 symlink 的文件，alias 永远不能路由到 `secrets/`。每个
+alias 必须提供单行 `description`，也可以提供单行
 alias-specific `guidance`，每项最多 500 characters；control characters 和
 multiline values 会被拒绝。生成的 `~/.codex/skills/<id>/SKILL.md` 使用这些
 discovery metadata，并链接 canonical file，不复制 instructions 或 bundled
@@ -198,7 +206,9 @@ resources。
 目录会拒绝覆盖；stale 或 retired 目录也只有带 banner 时才会删除，其他 Codex
 skills 保持不变。`dot unset codex` 遵守相同 ownership rule。`dot doctor` 会
 报告 missing alias、content drift 和 stale dot-managed alias。manifest 不存在
-时，普通 Codex entry rendering 行为不变。
+表示 desired alias set 为空；下一次 `dot set codex` 会删除带 dotpanel ownership
+banner 的 stale alias，但不会触碰 unmanaged Codex skill。普通 Codex entry
+rendering 仍会继续。
 
 ## `dkey` 做什么
 
@@ -225,8 +235,11 @@ dkey status
 dkey off
 ```
 
-`dkey on` 只影响当前 shell。直接运行 `command dkey on` 会拒绝输出含 secret
-的 shell code；要使用 `dot init` 安装的 shell function。
+`dkey on --with GRANT` 只影响当前 shell，unscoped activation 已禁用；切换到另一个
+grant 前必须先运行 `dkey off`。activation 与 removal 会先在 subshell preflight，
+readonly 或被篡改的 control variable 不会留下未追踪的 partial state。直接运行
+`command dkey on` 会拒绝输出含 secret 的 shell code；要使用 `dot init` 安装的
+shell function。
 
 AI backend 定义放在 `~/.agents/secrets/dkey.providers.json`。
 `claw`/`clawb`、`codx`/`codxb`、`gem`/`gemb` 读取这个 registry，并且只对
@@ -239,7 +252,15 @@ clawb kimi "prompt"
 
 `dkey use` 已移除，因为它会持久写入全局 harness 设置，并可能把 Codex
 ChatGPT/OAuth 登录态覆盖成 API-key mode。`dkey reset codex|claude|all` 只用于
-清理旧的持久 backend 设置。
+清理旧的持久 backend 设置。reset 会按 ownership 保守清理：Claude 只移除
+registry 声明的 managed env keys；Codex 只移除 registry-managed provider，并且
+仅在当前 top-level provider 属于 registry-managed 时清除 legacy API-key auth
+override。user-owned provider、无关设置和 OAuth token fields 都会保留。input
+会先验证并生成 replacement，再替换 target；这不宣称能够抵抗 filesystem
+failure 的跨文件 transaction。reset 遇到 multiline TOML 或 conservative legacy
+subset 以外的 provider-table 形式会拒绝执行，而不是 partial rewrite。reset
+target 必须位于 `HOME` 内，从 home boundary 到 target 的每一层 path component
+都不能是 symlink。
 
 Provider registry 位于 `~/.agents/secrets/dkey.providers.json`。参见
 [PROVIDERS.md](PROVIDERS.md) 了解完整 schema，模板在
@@ -253,6 +274,7 @@ Provider registry 位于 `~/.agents/secrets/dkey.providers.json`。参见
 - `~/.claude/CLAUDE.md`
 - `~/.codex/AGENTS.md`
 - `~/.kimi/AGENTS.md`
+- `~/.claude/skills/{hio,matt,impeccable}/`，内含 `.dotpanel-owner` marker
 - manifest `~/.agents/skills/sources.json` 声明的
   `~/.codex/skills/<alias>/SKILL.md`
 
@@ -270,7 +292,9 @@ Provider registry 位于 `~/.agents/secrets/dkey.providers.json`。参见
 - `dot sync push` 会拒绝 dirty memspace，只 push 已存在的 commits；它绝不
   stage 或 commit files。
 - `dot sync pull` 会先 fetch，再执行 clean-worktree 与 fast-forward-only gate，
-  然后递归初始化/更新 submodules；只有全部更新成功后才渲染 harness files。
+  然后递归初始化/更新 submodules。若 fast-forward 成功后 render preparation
+  失败，Git 会停在已拉取 commit，之前的 generated snapshot 保持不变；修复
+  source 后重跑 `dot set -a`，再用 `dot doctor` 验证。
 - `dot self update` 会拒绝 dirty managed checkout。
 - `dkey` 是 privileged 工具；subagent 或不该看到 secret 的脚本不要调用它。
 

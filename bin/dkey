@@ -37,7 +37,7 @@ Usage:
   dkey status
   dkey doctor
   dkey run --with GRANT [--with GRANT...] -- COMMAND [ARGS...]
-  dkey on [--with GRANT...]
+  dkey on --with GRANT [--with GRANT...]
   dkey off
   dkey version
   dkey help
@@ -45,7 +45,7 @@ Usage:
 Shell integration:
   `dot init` installs a shell function that evals `dkey on/off` in the current
   shell. Direct `dkey on` refuses to print secret-bearing shell code.
-  `dkey on` exports all encrypted keys; `dkey off` removes all variables it set.
+  `dkey on --with GRANT` exports only that grant; `dkey off` removes variables it set.
 EOF
 }
 
@@ -203,6 +203,23 @@ validate_key_name() {
     printf '%s' "$name" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$' || fail "invalid key name: $name"
 }
 
+validate_grant_env_name() {
+    env_name="$1"
+    validate_key_name "$env_name"
+    case "$env_name" in
+        DKEY_*|_DOTPANEL_DKEY_*|_dkey_*|PATH|HOME|SHELL|IFS|ENV|BASH_ENV|ZDOTDIR|CDPATH|FPATH|BASHOPTS|SHELLOPTS)
+            fail "reserved grant env name: $env_name"
+            ;;
+    esac
+}
+
+validate_grant_name() {
+    grant="$1"
+    case "$grant" in
+        ""|*[!A-Za-z0-9._-]*) fail "invalid grant name: $grant" ;;
+    esac
+}
+
 set_key_cmd() {
     ensure_dirs
     [ "$#" -gt 0 ] || fail "usage: dkey set NAME VALUE | dkey set NAME=VALUE"
@@ -313,14 +330,22 @@ edit_cmd() {
 
 grant_line() {
     grant="$1"
+    validate_grant_name "$grant"
     [ -f "$GRANTS_FILE" ] || fail "grants file missing: $GRANTS_FILE"
-    grep -E "^grant:${grant}:" "$GRANTS_FILE" | tail -n 1 || true
+    awk -F: -v grant="$grant" '
+        $1 == "grant" && $2 == grant { matched = $0 }
+        END { if (matched != "") print matched }
+    ' "$GRANTS_FILE"
 }
 
 extra_line() {
     grant="$1"
+    validate_grant_name "$grant"
     [ -f "$GRANTS_FILE" ] || return 0
-    grep -E "^extra:${grant}:" "$GRANTS_FILE" | tail -n 1 || true
+    awk -F: -v grant="$grant" '
+        $1 == "extra" && $2 == grant { matched = $0 }
+        END { if (matched != "") print matched }
+    ' "$GRANTS_FILE"
 }
 
 list_cmd() {
@@ -411,87 +436,319 @@ EOF
     return 1
 }
 
+providers_registry_valid() {
+    [ -f "$PROVIDERS_FILE" ] || return 1
+    jq -e '
+        def optional_object:
+            if . == null then true else type == "object" end;
+        def optional_nonempty_string:
+            if . == null then true
+            else type == "string" and length > 0 and (test("[\u0000-\u001F\u007F]") | not)
+            end;
+        def optional_string_array:
+            if . == null then true
+            elif type != "array" then false
+            else all(.[]; type == "string")
+            end;
+        def valid_settings:
+            if . == null then true
+            elif type != "object" then false
+            else (.env? | optional_object)
+            end;
+        def valid_default_claude:
+            if . == null then true
+            elif type != "object" then false
+            else
+                (.settings_path? | optional_nonempty_string) and
+                (.managed_env_keys? | optional_string_array) and
+                (.settings? | valid_settings)
+            end;
+        def valid_defaults:
+            if . == null then true
+            elif type != "object" then false
+            else
+                (.claude? | valid_default_claude) and
+                (.codex? | if . == null then true
+                    elif type != "object" then false
+                    else (.config_path? | optional_nonempty_string)
+                    end)
+            end;
+        def valid_profile:
+            if type != "object" then false
+            else
+                (.claude? | if . == null then true
+                    elif type != "object" then false
+                    else (.settings? | valid_settings)
+                    end) and
+                (.codex? | if . == null then true
+                    elif type != "object" then false
+                    else (.model_provider? |
+                        if . == null then true
+                        else type == "string" and test("^[A-Za-z0-9_-]+$")
+                        end)
+                    end)
+            end;
+        def valid_provider:
+            if type != "object" then false
+            elif (.profiles | type) != "object" then false
+            else all(.profiles[]; valid_profile)
+            end;
+        type == "object" and
+        .version == 1 and
+        (.providers | type) == "object" and
+        (.defaults? | valid_defaults) and
+        all(.providers[]; valid_provider)
+    ' "$PROVIDERS_FILE" >/dev/null 2>&1
+}
+
+validate_reset_target_path() {
+    reset_target="$1"
+    reset_label="$2"
+    case "$reset_target" in
+        "$HOME_DIR"/*) ;;
+        *) reset_abort "$reset_label path must stay below HOME: $reset_target" ;;
+    esac
+    case "$reset_target" in
+        */./*|*/.|*/../*|*/..) reset_abort "$reset_label path must be lexically normalized: $reset_target" ;;
+    esac
+    [ ! -L "$HOME_DIR" ] || reset_abort "$reset_label HOME boundary is symlinked: $HOME_DIR"
+    reset_cursor="$reset_target"
+    while [ "$reset_cursor" != "$HOME_DIR" ]; do
+        [ ! -L "$reset_cursor" ] || \
+            reset_abort "$reset_label path contains a symlink: $reset_cursor"
+        reset_parent="$(dirname "$reset_cursor")" || \
+            reset_abort "could not inspect $reset_label path: $reset_cursor"
+        [ "$reset_parent" != "$reset_cursor" ] || \
+            reset_abort "could not inspect $reset_label path: $reset_cursor"
+        case "$reset_parent" in
+            "$HOME_DIR"|"$HOME_DIR"/*) ;;
+            *) reset_abort "$reset_label path escaped HOME while inspecting: $reset_target" ;;
+        esac
+        reset_cursor="$reset_parent"
+    done
+    if [ -e "$reset_target" ] && [ ! -f "$reset_target" ]; then
+        reset_abort "$reset_label target is not a regular file: $reset_target"
+    fi
+}
+
 reset_cmd() {
     need_jq
-    harness="$1"
+    [ -f "$PROVIDERS_FILE" ] || fail "providers registry missing: $PROVIDERS_FILE"
+    providers_registry_valid || \
+        fail "providers registry invalid: $PROVIDERS_FILE"
+    harness="${1:-}"
     case "$harness" in
         claude|codex|all) ;;
         *) fail "reset requires: claude, codex, or all" ;;
     esac
 
+    reset_old_umask="$(umask)"
+    umask 077
+    mkdir -p "$DOT_DIR/var"
+    claude_reset_tmp=""
+    codex_reset_tmp=""
+    codex_auth_reset_tmp=""
+    managed_providers=""
+
+    reset_cleanup() {
+        for reset_file in "${claude_reset_tmp:-}" "${codex_reset_tmp:-}" \
+            "${codex_auth_reset_tmp:-}" "${managed_providers:-}"; do
+            [ -z "$reset_file" ] || rm -f "$reset_file" || true
+        done
+        umask "$reset_old_umask" || true
+    }
+    reset_signal_exit() {
+        reset_signal_status="$1"
+        trap - EXIT HUP INT TERM
+        reset_cleanup
+        exit "$reset_signal_status"
+    }
+    reset_abort() {
+        reset_message="$1"
+        reset_cleanup
+        fail "$reset_message"
+    }
+    trap 'reset_cleanup' EXIT
+    trap 'reset_signal_exit 129' HUP
+    trap 'reset_signal_exit 130' INT
+    trap 'reset_signal_exit 143' TERM
+
     case "$harness" in
         claude|all)
-            settings_path="$(expand_home_path "$(jq -r '.defaults.claude.settings_path // "~/.claude/settings.json"' "$PROVIDERS_FILE")")"
+            settings_value="$(jq -er '
+                .defaults.claude.settings_path // "~/.claude/settings.json"
+                | select(type == "string" and length > 0)
+            ' "$PROVIDERS_FILE")" || reset_abort "invalid Claude settings path in providers registry"
+            settings_path="$(expand_home_path "$settings_value")"
+            validate_reset_target_path "$settings_path" "Claude settings"
             if [ -f "$settings_path" ]; then
                 mkdir -p "$(dirname "$settings_path")"
-                # Remove all managed Claude env keys
-                jq 'del(.env.ANTHROPIC_API_KEY, .env.ANTHROPIC_AUTH_TOKEN, .env.ANTHROPIC_BASE_URL, .env.ANTHROPIC_MODEL, .env.ANTHROPIC_DEFAULT_HAIKU_MODEL, .env.ANTHROPIC_DEFAULT_SONNET_MODEL, .env.ANTHROPIC_DEFAULT_OPUS_MODEL, .env.ANTHROPIC_SMALL_FAST_MODEL, .env.CLAUDE_CODE_SUBAGENT_MODEL, .env.API_TIMEOUT_MS, .env.CLAUDE_CODE_ATTRIBUTION_HEADER, .env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, .env.ENABLE_TOOL_SEARCH)' "$settings_path" > "$settings_path.tmp"
-                mv "$settings_path.tmp" "$settings_path"
-                info "reset Claude Code — custom backend env vars cleared"
+                managed_keys="$(jq -ce '[
+                    (.defaults.claude.managed_env_keys // [])[],
+                    ((.defaults.claude.settings.env // {}) | keys[]),
+                    ((.providers[]?.profiles[]?.claude?.settings?.env // {}) | keys[])
+                ] | unique | select(all(.[]; type == "string"))' "$PROVIDERS_FILE")" || \
+                    reset_abort "invalid Claude managed env declarations in providers registry"
+                jq -e 'type == "object" and ((.env? == null) or ((.env | type) == "object"))' \
+                    "$settings_path" >/dev/null 2>&1 || \
+                    reset_abort "Claude settings file is not a JSON object: $settings_path"
+                claude_reset_tmp="$(mktemp "$settings_path.dkey-reset.XXXXXX")" || \
+                    reset_abort "could not create Claude reset file beside: $settings_path"
+                jq --argjson keys "$managed_keys" '
+                    .env = ((.env // {}) | with_entries(
+                        select(.key as $key | ($keys | index($key) | not))
+                    ))
+                    | if .env == {} then del(.env) else . end
+                ' "$settings_path" > "$claude_reset_tmp" || \
+                    reset_abort "could not prepare Claude settings reset: $settings_path"
+                chmod 600 "$claude_reset_tmp" || \
+                    reset_abort "could not protect Claude reset file: $claude_reset_tmp"
             fi
             ;;
     esac
 
     case "$harness" in
         codex|all)
-            config_path="$(expand_home_path "$(jq -r '.defaults.codex.config_path // "~/.codex/config.toml"' "$PROVIDERS_FILE")")"
+            config_value="$(jq -er '
+                .defaults.codex.config_path // "~/.codex/config.toml"
+                | select(type == "string" and length > 0)
+            ' "$PROVIDERS_FILE")" || reset_abort "invalid Codex config path in providers registry"
+            config_path="$(expand_home_path "$config_value")"
+            validate_reset_target_path "$config_path" "Codex config"
+            if [ -f "$config_path" ] && \
+                { grep -Fq '"""' "$config_path" || grep -Fq "'''" "$config_path"; }; then
+                reset_abort "refusing to rewrite Codex config with multiline TOML strings: $config_path"
+            fi
+            if [ -f "$config_path" ] && ! awk '
+                /^[[:space:]]*\[/ { in_table = 1 }
+                /=[[:space:]]*\[[[:space:]]*(#.*)?$/ { invalid = 1 }
+                /^[[:space:]]*\[/ &&
+                    $0 !~ /^[[:space:]]*\[[A-Za-z0-9_.-]+\][[:space:]]*(#.*)?$/ {
+                    invalid = 1
+                }
+                !in_table {
+                    candidate = $0
+                    sub(/^[[:space:]]*/, "", candidate)
+                    key_quote = substr(candidate, 1, 1)
+                    if ((key_quote == "\"" || key_quote == sprintf("%c", 39)) &&
+                        substr(candidate, 2, 14) == "model_provider" &&
+                        substr(candidate, 16, 1) == key_quote &&
+                        substr(candidate, 17) ~ /^[[:space:]]*=/) {
+                        invalid = 1
+                    }
+                }
+                /^[[:space:]]*\[model_providers\./ &&
+                    $0 !~ /^[[:space:]]*\[model_providers\.[A-Za-z0-9_-]+\][[:space:]]*(#.*)?$/ {
+                    invalid = 1
+                }
+                END { exit invalid }
+            ' "$config_path"; then
+                reset_abort "refusing unsupported Codex TOML table/bracket syntax: $config_path"
+            fi
+            managed_providers="$(mktemp "$DOT_DIR/var/codex-reset-providers.XXXXXX")" || \
+                reset_abort "could not create Codex provider reset list"
+            jq -e '[.providers[]?.profiles[]?.codex?.model_provider // empty]
+                | all(.[]; type == "string" and test("^[A-Za-z0-9_-]+$"))' \
+                "$PROVIDERS_FILE" >/dev/null 2>&1 || \
+                    reset_abort "invalid Codex provider IDs in providers registry"
+            jq -r '[.providers[]?.profiles[]?.codex?.model_provider // empty]
+                | unique[]' "$PROVIDERS_FILE" > "$managed_providers" || \
+                    reset_abort "could not read Codex provider IDs from providers registry"
+            clear_codex_auth=0
             if [ -f "$config_path" ]; then
-                mkdir -p "$(dirname "$config_path")" "$DOT_DIR/var"
-                tmp="$DOT_DIR/var/codex-reset.$$"
-                rest="$DOT_DIR/var/codex-reset-rest.$$"
-                # Remove model_provider, model, review_model and all [model_providers.*] sections
-                awk '
-                    BEGIN { in_provider_section = 0 }
-                    /^\[model_providers\./ { in_provider_section = 1; next }
-                    /^\[/ && in_provider_section { in_provider_section = 0 }
-                    in_provider_section { next }
-                    /^(model_provider|model|review_model)[[:space:]]*=/ { next }
+                mkdir -p "$(dirname "$config_path")"
+                current_provider="$(awk '
+                    /^[[:space:]]*\[/ { exit }
+                    /^[[:space:]]*model_provider[[:space:]]*=/ {
+                        value = $0
+                        sub(/^[^=]*=[[:space:]]*/, "", value)
+                        sub(/[[:space:]#].*$/, "", value)
+                        quote = substr(value, 1, 1)
+                        if ((quote == "\"" || quote == sprintf("%c", 39)) &&
+                            substr(value, length(value), 1) == quote) {
+                            value = substr(value, 2, length(value) - 2)
+                        }
+                        print value
+                        exit
+                    }
+                ' "$config_path")"
+                clear_top=0
+                if [ -n "$current_provider" ] && grep -qxF "$current_provider" "$managed_providers"; then
+                    clear_top=1
+                    clear_codex_auth=1
+                fi
+                codex_reset_tmp="$(mktemp "$config_path.dkey-reset.XXXXXX")" || \
+                    reset_abort "could not create Codex reset file beside: $config_path"
+                awk -v managed_file="$managed_providers" -v clear_top="$clear_top" '
+                    BEGIN {
+                        top = 1
+                        skip = 0
+                        while ((getline provider < managed_file) > 0) managed[provider] = 1
+                        close(managed_file)
+                    }
+                    /^[[:space:]]*\[/ {
+                        top = 0
+                        skip = 0
+                        if ($0 ~ /^[[:space:]]*\[model_providers\.[A-Za-z0-9_-]+\][[:space:]]*(#.*)?$/) {
+                            provider = $0
+                            sub(/^[[:space:]]*\[model_providers\./, "", provider)
+                            sub(/\][[:space:]]*(#.*)?$/, "", provider)
+                            if (provider in managed) { skip = 1; next }
+                        }
+                    }
+                    skip { next }
+                    top && clear_top && /^[[:space:]]*(model_provider|model|review_model)[[:space:]]*=/ { next }
                     { print }
-                ' "$config_path" > "$rest"
-                cat "$rest" > "$config_path"
-                rm -f "$rest" "$tmp"
-                info "reset Codex — custom backend settings cleared"
+                ' "$config_path" > "$codex_reset_tmp" || \
+                    reset_abort "could not prepare Codex config reset: $config_path"
+                chmod 600 "$codex_reset_tmp" || \
+                    reset_abort "could not protect Codex reset file: $codex_reset_tmp"
+            fi
+            auth_path="$HOME_DIR/.codex/auth.json"
+            [ "$clear_codex_auth" -eq 0 ] || validate_reset_target_path "$auth_path" "Codex auth"
+            if [ "$clear_codex_auth" -eq 1 ] && [ -f "$auth_path" ]; then
+                jq -e 'type == "object"' "$auth_path" >/dev/null 2>&1 || \
+                    reset_abort "Codex auth file is not a JSON object: $auth_path"
+                codex_auth_reset_tmp="$(mktemp "$auth_path.dkey-reset.XXXXXX")" || \
+                    reset_abort "could not create Codex auth reset file beside: $auth_path"
+                jq 'if .auth_mode == "apikey" then del(.auth_mode, .OPENAI_API_KEY) else . end' \
+                    "$auth_path" > "$codex_auth_reset_tmp" || \
+                    reset_abort "could not prepare Codex auth reset: $auth_path"
+                chmod 600 "$codex_auth_reset_tmp" || \
+                    reset_abort "could not protect Codex auth reset file: $codex_auth_reset_tmp"
             fi
             ;;
     esac
-}
 
-emit_exports_for_grant() {
-    grant="$1"
-    line="$(grant_line "$grant")"
-    [ -n "$line" ] || fail "grant not found: $grant (available: $(grant_names_csv))"
-    mapping="${line#grant:${grant}:}"
-    keys_plain="$(decrypt_keys)"
-
-    old_ifs="$IFS"
-    IFS=','
-    for pair in $mapping; do
-        env_name="${pair%%=*}"
-        secret_name="${pair#*=}"
-        [ -n "$env_name" ] && [ -n "$secret_name" ] || fail "bad grant mapping: $pair"
-        value="$(printf '%s\n' "$keys_plain" | lookup_secret "$secret_name")" || fail "secret not found: $secret_name"
-        quoted="$(printf '%s' "$value" | shell_quote)"
-        printf 'export %s=%s\n' "$env_name" "$quoted"
-        managed="${managed:-}${managed:+ }$env_name"
-    done
-    IFS="$old_ifs"
-
-    extra="$(extra_line "$grant")"
-    if [ -n "$extra" ]; then
-        extras="${extra#extra:${grant}:}"
-        IFS=','
-        for pair in $extras; do
-            env_name="${pair%%=*}"
-            value="${pair#*=}"
-            quoted="$(printf '%s' "$value" | shell_quote)"
-            printf 'export %s=%s\n' "$env_name" "$quoted"
-            managed="${managed:-}${managed:+ }$env_name"
-        done
-        IFS="$old_ifs"
+    reset_claude_changed=0
+    reset_codex_changed=0
+    reset_auth_changed=0
+    if [ -n "$claude_reset_tmp" ]; then
+        mv "$claude_reset_tmp" "$settings_path" || \
+            reset_abort "could not install Claude settings reset: $settings_path"
+        claude_reset_tmp=""
+        reset_claude_changed=1
     fi
-
-    printf 'export DKEY_ACTIVE_GRANT=%s\n' "$(printf '%s' "$grant" | shell_quote)"
-    printf 'export DKEY_MANAGED_VARS=%s\n' "$(printf '%s' "${managed:-}" | shell_quote)"
+    if [ -n "$codex_reset_tmp" ]; then
+        mv "$codex_reset_tmp" "$config_path" || \
+            reset_abort "could not install Codex config reset: $config_path"
+        codex_reset_tmp=""
+        reset_codex_changed=1
+    fi
+    if [ -n "$codex_auth_reset_tmp" ]; then
+        mv "$codex_auth_reset_tmp" "$auth_path" || \
+            reset_abort "could not install Codex auth reset: $auth_path"
+        codex_auth_reset_tmp=""
+        reset_auth_changed=1
+    fi
+    reset_cleanup
+    trap - EXIT HUP INT TERM
+    [ "$reset_claude_changed" -eq 0 ] || \
+        info "reset Claude Code — registry-managed backend env vars cleared"
+    [ "$reset_codex_changed" -eq 0 ] || \
+        info "reset Codex — registry-managed provider settings cleared"
+    [ "$reset_auth_changed" -eq 0 ] || \
+        info "reset Codex — legacy API-key auth override cleared; OAuth fields preserved"
 }
 
 emit_exports_for_grants() {
@@ -509,12 +766,15 @@ emit_exports_for_grants() {
         old_ifs="$IFS"
         IFS=','
         for pair in $mapping; do
+            case "$pair" in *=*) ;; *) fail "bad grant mapping: $pair" ;; esac
             env_name="${pair%%=*}"
             secret_name="${pair#*=}"
             [ -n "$env_name" ] && [ -n "$secret_name" ] || fail "bad grant mapping: $pair"
+            validate_grant_env_name "$env_name"
+            validate_key_name "$secret_name"
             value="$(printf '%s\n' "$keys_plain" | lookup_secret "$secret_name")" || fail "secret not found: $secret_name"
             quoted="$(printf '%s' "$value" | shell_quote)"
-            printf 'export %s=%s\n' "$env_name" "$quoted"
+            printf 'export %s=%s &&\n' "$env_name" "$quoted"
             managed="${managed:-}${managed:+ }$env_name"
         done
         IFS="$old_ifs"
@@ -524,10 +784,12 @@ emit_exports_for_grants() {
             extras="${extra#extra:${grant}:}"
             IFS=','
             for pair in $extras; do
+                case "$pair" in *=*) ;; *) fail "bad extra mapping: $pair" ;; esac
                 env_name="${pair%%=*}"
                 value="${pair#*=}"
+                validate_grant_env_name "$env_name"
                 quoted="$(printf '%s' "$value" | shell_quote)"
-                printf 'export %s=%s\n' "$env_name" "$quoted"
+                printf 'export %s=%s &&\n' "$env_name" "$quoted"
                 managed="${managed:-}${managed:+ }$env_name"
             done
             IFS="$old_ifs"
@@ -536,35 +798,7 @@ emit_exports_for_grants() {
         active="${active:-}${active:+,}$grant"
     done
 
-    printf 'export DKEY_ACTIVE_GRANT=%s\n' "$(printf '%s' "$active" | shell_quote)"
-    printf 'export DKEY_MANAGED_VARS=%s\n' "$(printf '%s' "$managed" | shell_quote)"
-}
-
-emit_exports_for_all_keys() {
-    keys_plain="$(decrypt_keys)"
-    managed=""
-    printf '%s\n' "$keys_plain" | while IFS= read -r line; do
-        case "$line" in
-            ""|\#*) continue ;;
-            *=*)
-                env_name="${line%%=*}"
-                value="${line#*=}"
-                validate_key_name "$env_name"
-                quoted="$(printf '%s' "$value" | shell_quote)"
-                printf 'export %s=%s\n' "$env_name" "$quoted"
-                managed="${managed:-}${managed:+ }$env_name"
-                ;;
-        esac
-    done
-    managed="$(printf '%s\n' "$keys_plain" | awk -F= '
-        $0 ~ /^[[:space:]]*#/ { next }
-        $1 ~ /^[A-Za-z_][A-Za-z0-9_]*$/ {
-            if (managed != "") managed = managed " "
-            managed = managed $1
-        }
-        END { print managed }
-    ')"
-    printf 'export DKEY_ACTIVE_GRANT=%s\n' "'all'"
+    printf 'export DKEY_ACTIVE_GRANT=%s &&\n' "$(printf '%s' "$active" | shell_quote)"
     printf 'export DKEY_MANAGED_VARS=%s\n' "$(printf '%s' "$managed" | shell_quote)"
 }
 
@@ -582,23 +816,27 @@ shell_on_cmd() {
         esac
         shift
     done
-    if [ -n "$grants" ]; then
-        emit_exports_for_grants "$grants"
-    else
-        emit_exports_for_all_keys
-    fi
+    [ -n "$grants" ] || fail "dkey on requires --with GRANT; unscoped activation is disabled"
+    emit_exports_for_grants "$grants"
 }
 
 shell_off_cmd() {
     cat <<'EOF'
+_DOTPANEL_DKEY_OFF_STATUS=0
 if [ -n "${DKEY_MANAGED_VARS:-}" ]; then
     for _dkey_var in $DKEY_MANAGED_VARS; do
-        unset "$_dkey_var"
+        case "$_dkey_var" in
+            ""|*[!A-Za-z0-9_]*|[0-9]*|DKEY_*|_DOTPANEL_DKEY_*|_dkey_*|PATH|HOME|SHELL|IFS|ENV|BASH_ENV|ZDOTDIR|CDPATH|FPATH|BASHOPTS|SHELLOPTS)
+                _DOTPANEL_DKEY_OFF_STATUS=1
+                ;;
+            *) unset "$_dkey_var" || _DOTPANEL_DKEY_OFF_STATUS=$? ;;
+        esac
     done
 fi
-unset DKEY_ACTIVE_GRANT
-unset DKEY_MANAGED_VARS
+unset DKEY_ACTIVE_GRANT || _DOTPANEL_DKEY_OFF_STATUS=$?
+unset DKEY_MANAGED_VARS || _DOTPANEL_DKEY_OFF_STATUS=$?
 unset _dkey_var
+[ "$_DOTPANEL_DKEY_OFF_STATUS" -eq 0 ]
 EOF
 }
 
@@ -642,15 +880,24 @@ doctor_cmd() {
     command -v age >/dev/null 2>&1 && info "age found" || { warn "age missing"; problems=$((problems + 1)); }
     command -v age-keygen >/dev/null 2>&1 && info "age-keygen found" || { warn "age-keygen missing"; problems=$((problems + 1)); }
     command -v jq >/dev/null 2>&1 && info "jq found" || { warn "jq missing"; problems=$((problems + 1)); }
-    [ -f "$AGE_IDENTITY_FILE" ] && info "age identity exists: $AGE_IDENTITY_FILE" || warn "age identity missing: $AGE_IDENTITY_FILE"
-    [ -f "$KEYS_FILE" ] && info "keys file exists: $KEYS_FILE" || warn "keys file missing: $KEYS_FILE"
-    [ -f "$GRANTS_FILE" ] && info "grants file exists: $GRANTS_FILE" || warn "grants file missing: $GRANTS_FILE"
+    [ -f "$AGE_IDENTITY_FILE" ] && info "age identity exists: $AGE_IDENTITY_FILE" || {
+        warn "age identity missing: $AGE_IDENTITY_FILE"
+        problems=$((problems + 1))
+    }
+    [ -f "$KEYS_FILE" ] && info "keys file exists: $KEYS_FILE" || {
+        warn "keys file missing: $KEYS_FILE"
+        problems=$((problems + 1))
+    }
+    [ -f "$GRANTS_FILE" ] && info "grants file exists: $GRANTS_FILE" || {
+        warn "grants file missing: $GRANTS_FILE"
+        problems=$((problems + 1))
+    }
     if [ -f "$PROVIDERS_FILE" ]; then
         if command -v jq >/dev/null 2>&1; then
-            if jq -e '.version and .defaults and .providers' "$PROVIDERS_FILE" >/dev/null 2>&1; then
+            if providers_registry_valid; then
                 info "providers registry valid: $PROVIDERS_FILE"
             else
-                warn "providers registry invalid (missing version/defaults/providers): $PROVIDERS_FILE"
+                warn "providers registry invalid or unsupported: $PROVIDERS_FILE"
                 problems=$((problems + 1))
             fi
         else
@@ -658,6 +905,7 @@ doctor_cmd() {
         fi
     else
         warn "providers registry missing: $PROVIDERS_FILE"
+        problems=$((problems + 1))
     fi
     [ "$problems" -eq 0 ] || return 2
 }

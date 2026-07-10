@@ -61,15 +61,23 @@
   replacement is preserved and fails closed.
 - Generated harness roots are revalidated after directory creation and before
   replacement. Wrapper unset requires the exact generated first-line marker,
-  and skill frontmatter rejects malformed block headers and non-string YAML
-  scalars consistently with the memspace checker.
+  and skill frontmatter is now parsed with duplicate-key-safe PyYAML. Block
+  scalar names, malformed documents, non-string scalars, and non-UTF-8 values
+  are rejected consistently with the memspace checker; deprecated ad-hoc
+  `type`/`supported_harnesses` text filters were removed.
 - `dkey reset codex` fails closed on dotted `model_providers.*` keys and
-  array-of-table syntax instead of partially removing managed provider state.
+  array-of-table syntax, including whitespace and quoted-key variants, instead
+  of partially removing managed provider state.
+- Sensitive identity/encrypted-key targets must be absolute, lexically
+  normalized regular files below non-symlinked mutation boundaries. Directory,
+  symlink, and initially-absent targets that appear during work are refused;
+  `--force` does not authorize replacing a target that appeared mid-operation.
 - `dot doctor` now exits non-zero for a missing memspace entry, wrapper or
   `env.sh` drift, unsafe generated-file types, or generated Claude plugins that
   differ from their source render. `dkey doctor` uses the same versioned schema
   as reset, validates the age identity and encrypted-key decryptability, and
-  treats missing or empty operational inputs as failures.
+  treats missing, empty, symlinked, non-regular, or group/other-accessible
+  identity inputs as failures.
 - jq 1.8.1 compatibility in `write_claude_use`.
 
 ## 0.0.1 — 2026-05-14

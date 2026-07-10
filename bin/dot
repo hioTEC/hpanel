@@ -693,82 +693,82 @@ read_skill_metadata() {
         warn "$metadata_label SKILL.md missing or symlinked: $metadata_file"
         return 1
     }
-    SKILL_FRONTMATTER="$(awk '
-        NR == 1 {
-            if ($0 != "---") exit 1
-            in_frontmatter = 1
-            next
-        }
-        in_frontmatter && $0 == "---" {
-            closed = 1
-            exit
-        }
-        in_frontmatter { print }
-        END { if (!closed) exit 1 }
-    ' "$metadata_file")" || {
-        warn "$metadata_label has invalid or unclosed frontmatter: $metadata_file"
+    command -v python3 >/dev/null 2>&1 || {
+        warn "python3 with PyYAML is required to validate skill frontmatter"
         return 1
     }
-    skill_name_count="$(printf '%s\n' "$SKILL_FRONTMATTER" | awk '/^name:[[:space:]]*/ { count++ } END { print count + 0 }')"
-    skill_description_count="$(printf '%s\n' "$SKILL_FRONTMATTER" | awk '/^description:[[:space:]]*/ { count++ } END { print count + 0 }')"
-    [ "$skill_name_count" -eq 1 ] && [ "$skill_description_count" -eq 1 ] || {
-        warn "$metadata_label must declare name and description exactly once: $metadata_file"
+    SKILL_NAME="$(python3 - "$metadata_file" <<'PY'
+import sys
+
+try:
+    import yaml
+except ImportError:
+    raise SystemExit(2)
+
+
+class UniqueSafeLoader(yaml.SafeLoader):
+    pass
+
+
+def construct_mapping(loader, node, deep=False):
+    loader.flatten_mapping(node)
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"duplicate key: {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+UniqueSafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    construct_mapping,
+)
+
+try:
+    lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+    if not lines or lines[0] != "---":
+        raise ValueError("opening marker is required")
+    closing = lines[1:].index("---") + 1
+    frontmatter_lines = lines[1:closing]
+    frontmatter = "\n".join(frontmatter_lines)
+    metadata = yaml.load(frontmatter, Loader=UniqueSafeLoader)
+    metadata_node = yaml.compose(frontmatter, Loader=yaml.SafeLoader)
+    if not isinstance(metadata, dict):
+        raise ValueError("frontmatter must be a mapping")
+    name_node = None
+    if isinstance(metadata_node, yaml.nodes.MappingNode):
+        for key_node, value_node in metadata_node.value:
+            if isinstance(key_node, yaml.nodes.ScalarNode) and key_node.value == "name":
+                name_node = value_node
+                break
+    if not isinstance(name_node, yaml.nodes.ScalarNode) or name_node.style in {"|", ">"}:
+        raise ValueError("name must be an inline string")
+    name = metadata.get("name")
+    description = metadata.get("description")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("name must be a non-empty string")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("description must be a non-empty string")
+    name.encode("utf-8")
+    description.encode("utf-8")
+except (OSError, UnicodeError, ValueError, TypeError, yaml.YAMLError):
+    raise SystemExit(1)
+
+print(name.strip())
+PY
+    )" || {
+        warn "$metadata_label has no description or invalid frontmatter: $metadata_file"
         return 1
     }
-    SKILL_NAME="$(printf '%s\n' "$SKILL_FRONTMATTER" | sed -n 's/^name:[[:space:]]*//p' | head -1)"
-    SKILL_NAME="$(printf '%s\n' "$SKILL_NAME" | sed 's/[[:space:]]#.*$//; s/[[:space:]]*$//')"
-    SKILL_DESCRIPTION="$(printf '%s\n' "$SKILL_FRONTMATTER" | sed -n 's/^description:[[:space:]]*//p' | head -1)"
-    case "$SKILL_NAME" in
-        \"*\") SKILL_NAME="${SKILL_NAME#\"}"; SKILL_NAME="${SKILL_NAME%\"}" ;;
-        \'*\') SKILL_NAME="${SKILL_NAME#\'}"; SKILL_NAME="${SKILL_NAME%\'}" ;;
-    esac
-    case "$SKILL_DESCRIPTION" in
-        \"*\") SKILL_DESCRIPTION="${SKILL_DESCRIPTION#\"}"; SKILL_DESCRIPTION="${SKILL_DESCRIPTION%\"}" ;;
-        \'*\') SKILL_DESCRIPTION="${SKILL_DESCRIPTION#\'}"; SKILL_DESCRIPTION="${SKILL_DESCRIPTION%\'}" ;;
-    esac
     is_safe_skill_id "$SKILL_NAME" || {
         warn "$metadata_label has unsafe skill name: $SKILL_NAME"
-        return 1
-    }
-    skill_description_scalar="$(printf '%s\n' "$SKILL_DESCRIPTION" | sed 's/[[:space:]]#.*$//; s/^[[:space:]]*//; s/[[:space:]]*$//')"
-    skill_description_valid=1
-    case "$skill_description_scalar" in
-        ""|\#*|null|Null|NULL|~|true|True|TRUE|false|False|FALSE|'[]'|'{}'|'""'|"''")
-            skill_description_valid=0
-            ;;
-        \>*|\|*)
-            if ! printf '%s\n' "$skill_description_scalar" | grep -Eq '^[>|]([1-9][+-]?|[+-][1-9]?)?$' || \
-                ! printf '%s\n' "$SKILL_FRONTMATTER" | awk '
-                    /^description:[[:space:]]*[>|]([1-9][+-]?|[+-][1-9]?)?([[:space:]]+#.*)?$/ {
-                        in_description = 1
-                        next
-                    }
-                    in_description && /^[[:space:]]+/ {
-                        content = $0
-                        sub(/^[[:space:]]+/, "", content)
-                        if (content != "") found = 1
-                        next
-                    }
-                    in_description && /^$/ { next }
-                    in_description { in_description = 0 }
-                    END { exit !found }
-                '; then
-                skill_description_valid=0
-            fi
-            ;;
-    esac
-    case "$(printf '%s' "$skill_description_scalar" | tr '[:upper:]' '[:lower:]')" in
-        yes|no|on|off|.inf|+.inf|-.inf|.nan) skill_description_valid=0 ;;
-    esac
-    case "$skill_description_scalar" in
-        *': '*) skill_description_valid=0 ;;
-    esac
-    if printf '%s\n' "$skill_description_scalar" | grep -Eq \
-        '^[-+]?(0|[1-9][0-9_]*)(\.[0-9_]+)?([eE][-+]?[0-9]+)?$|^[-+]?0[xX][0-9A-Fa-f_]+$|^[-+]?0[oO][0-7_]+$|^[-+]?0[bB][01_]+$|^[0-9]{4}-[0-9]{2}-[0-9]{2}([Tt ].*)?$'; then
-        skill_description_valid=0
-    fi
-    [ "$skill_description_valid" -eq 1 ] || {
-        warn "$metadata_label has no description: $metadata_file"
         return 1
     }
 }
@@ -804,14 +804,6 @@ _gen_plugin_flat() {
 
         read_skill_metadata "$skill_file" "$plugin_name skill" || return 1
         skill_name="$SKILL_NAME"
-        skill_type=$(printf '%s\n' "$SKILL_FRONTMATTER" | sed -n 's/^type: *//p' | head -1)
-        skill_harnesses=$(printf '%s\n' "$SKILL_FRONTMATTER" | sed -n 's/^supported_harnesses: *//p' | head -1)
-
-        [ -z "$skill_type" ] || [ "$skill_type" = "skill" ] || continue
-        if [ -n "$skill_harnesses" ]; then
-            case "$skill_harnesses" in *claude*) ;; *) continue ;; esac
-        fi
-
         [ ! -e "$tmp/skills/$skill_name" ] || {
             warn "$plugin_name plugin has duplicate skill name: $skill_name"
             return 1
@@ -1915,6 +1907,12 @@ doctor_cmd() {
         info "jq found"
     else
         warn "jq missing; dkey provider JSON features will not work"
+        problems=$((problems + 1))
+    fi
+    if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' >/dev/null 2>&1; then
+        info "python3 + PyYAML found"
+    else
+        warn "python3 + PyYAML missing; skill frontmatter cannot be validated"
         problems=$((problems + 1))
     fi
     if [ "$problems" -gt 0 ]; then

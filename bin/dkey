@@ -69,6 +69,61 @@ ensure_dirs() {
     mkdir -p "$SECRETS_DIR" "$DOT_DIR/var"
 }
 
+validate_sensitive_target_path() {
+    sensitive_target="$1"
+    sensitive_label="$2"
+    case "$sensitive_target" in
+        /*) ;;
+        *)
+            warn "$sensitive_label path must be absolute and lexically normalized: $sensitive_target"
+            return 1
+            ;;
+    esac
+    case "$sensitive_target" in
+        *//*|*/./*|*/.|*/../*|*/..|*/)
+            warn "$sensitive_label path must be absolute and lexically normalized: $sensitive_target"
+            return 1
+            ;;
+    esac
+    [ ! -L "$sensitive_target" ] || {
+        warn "$sensitive_label must not be symlinked: $sensitive_target"
+        return 1
+    }
+    if [ -e "$sensitive_target" ] && [ ! -f "$sensitive_target" ]; then
+        warn "$sensitive_label is not a regular file: $sensitive_target"
+        return 1
+    fi
+    sensitive_parent="$(dirname "$sensitive_target")" || return 1
+    if [ -e "$sensitive_parent" ] && [ ! -d "$sensitive_parent" ]; then
+        warn "$sensitive_label parent is not a directory: $sensitive_parent"
+        return 1
+    fi
+    case "$sensitive_target" in
+        "$HOME_DIR"/*)
+            [ ! -L "$HOME_DIR" ] || {
+                warn "$sensitive_label HOME boundary must not be symlinked: $HOME_DIR"
+                return 1
+            }
+            sensitive_cursor="$sensitive_target"
+            while [ "$sensitive_cursor" != "$HOME_DIR" ]; do
+                [ ! -L "$sensitive_cursor" ] || {
+                    warn "$sensitive_label path contains a symlink: $sensitive_cursor"
+                    return 1
+                }
+                sensitive_next="$(dirname "$sensitive_cursor")" || return 1
+                [ "$sensitive_next" != "$sensitive_cursor" ] || return 1
+                sensitive_cursor="$sensitive_next"
+            done
+            ;;
+        *)
+            [ ! -L "$sensitive_parent" ] || {
+                warn "$sensitive_label parent must not be symlinked: $sensitive_parent"
+                return 1
+            }
+            ;;
+    esac
+}
+
 DKEY_SENSITIVE_ACTIVE=0
 DKEY_SENSITIVE_OLD_UMASK=""
 DKEY_SENSITIVE_TMP_PRIMARY=""
@@ -158,13 +213,27 @@ EOF
 
 keygen_cmd() {
     command -v age-keygen >/dev/null 2>&1 || fail "age-keygen is required"
+    validate_sensitive_target_path "$AGE_IDENTITY_FILE" "age identity" || \
+        fail "unsafe age identity target"
     if [ -f "$AGE_IDENTITY_FILE" ]; then
         info "age identity already exists: $AGE_IDENTITY_FILE"
         return 0
     fi
-    mkdir -p "$(dirname "$AGE_IDENTITY_FILE")"
-    age-keygen -o "$AGE_IDENTITY_FILE"
-    chmod 600 "$AGE_IDENTITY_FILE"
+    identity_dir="$(dirname "$AGE_IDENTITY_FILE")"
+    mkdir -p "$identity_dir"
+    validate_sensitive_target_path "$AGE_IDENTITY_FILE" "age identity" || \
+        fail "unsafe age identity target"
+    sensitive_begin
+    DKEY_SENSITIVE_TMP_PRIMARY="$(mktemp "$identity_dir/.dkey-identity.XXXXXX")" || \
+        fail "could not create protected age identity file"
+    age-keygen > "$DKEY_SENSITIVE_TMP_PRIMARY"
+    chmod 600 "$DKEY_SENSITIVE_TMP_PRIMARY"
+    validate_sensitive_target_path "$AGE_IDENTITY_FILE" "age identity" || \
+        fail "unsafe age identity target"
+    [ ! -e "$AGE_IDENTITY_FILE" ] || fail "age identity appeared during key generation"
+    mv "$DKEY_SENSITIVE_TMP_PRIMARY" "$AGE_IDENTITY_FILE"
+    DKEY_SENSITIVE_TMP_PRIMARY=""
+    sensitive_finish
     info "created age identity: $AGE_IDENTITY_FILE"
 }
 
@@ -198,12 +267,18 @@ identity_import_cmd() {
     done
 
     [ -n "$src" ] || fail "identity import requires PATH or --stdin"
+    validate_sensitive_target_path "$AGE_IDENTITY_FILE" "age identity" || \
+        fail "unsafe age identity target"
+    identity_target_existed=0
+    [ ! -f "$AGE_IDENTITY_FILE" ] || identity_target_existed=1
     if [ -f "$AGE_IDENTITY_FILE" ] && ! $force; then
         fail "age identity already exists: $AGE_IDENTITY_FILE; pass --force to replace it"
     fi
 
     identity_dir="$(dirname "$AGE_IDENTITY_FILE")"
     mkdir -p "$identity_dir"
+    validate_sensitive_target_path "$AGE_IDENTITY_FILE" "age identity" || \
+        fail "unsafe age identity target"
     sensitive_begin
     DKEY_SENSITIVE_TMP_PRIMARY="$(mktemp "$identity_dir/.dkey-identity.XXXXXX")" || \
         fail "could not create protected age identity import file"
@@ -217,6 +292,11 @@ identity_import_cmd() {
     age-keygen -y "$DKEY_SENSITIVE_TMP_PRIMARY" >/dev/null 2>&1 || \
         fail "invalid age identity"
     chmod 600 "$DKEY_SENSITIVE_TMP_PRIMARY"
+    validate_sensitive_target_path "$AGE_IDENTITY_FILE" "age identity" || \
+        fail "unsafe age identity target"
+    if [ "$identity_target_existed" -eq 0 ] && [ -e "$AGE_IDENTITY_FILE" ]; then
+        fail "age identity appeared during import; refusing to replace it"
+    fi
     mv "$DKEY_SENSITIVE_TMP_PRIMARY" "$AGE_IDENTITY_FILE"
     DKEY_SENSITIVE_TMP_PRIMARY=""
     sensitive_finish
@@ -235,6 +315,7 @@ identity_cmd() {
 }
 
 public_recipient_from_identity() {
+    validate_sensitive_target_path "$AGE_IDENTITY_FILE" "age identity" || return 1
     [ -f "$AGE_IDENTITY_FILE" ] || return 1
     age-keygen -y "$AGE_IDENTITY_FILE" 2>/dev/null
 }
@@ -250,9 +331,18 @@ encrypt_plaintext() {
     need_age
     command -v age-keygen >/dev/null 2>&1 || fail "age-keygen is required"
     encrypt_recipient="$(public_recipient_from_identity)" || fail "age identity missing at $AGE_IDENTITY_FILE"
+    validate_sensitive_target_path "$encrypt_output" "encrypted keys" || \
+        fail "unsafe encrypted keys target"
+    encrypt_target_existed=0
+    [ ! -f "$encrypt_output" ] || encrypt_target_existed=1
     DKEY_SENSITIVE_TMP_CIPHER="$(mktemp "$encrypt_output.dkey-encrypt.XXXXXX")" || \
         fail "could not create protected encrypted keys file"
     age -r "$encrypt_recipient" "$encrypt_input" > "$DKEY_SENSITIVE_TMP_CIPHER"
+    validate_sensitive_target_path "$encrypt_output" "encrypted keys" || \
+        fail "unsafe encrypted keys target"
+    if [ "$encrypt_target_existed" -eq 0 ] && [ -e "$encrypt_output" ]; then
+        fail "encrypted keys target appeared during encryption"
+    fi
     mv "$DKEY_SENSITIVE_TMP_CIPHER" "$encrypt_output"
     DKEY_SENSITIVE_TMP_CIPHER=""
     if [ "$encrypt_owns_sensitive_scope" -eq 1 ]; then
@@ -262,6 +352,10 @@ encrypt_plaintext() {
 
 decrypt_keys() {
     need_age
+    validate_sensitive_target_path "$KEYS_FILE" "encrypted keys" || \
+        fail "unsafe encrypted keys target"
+    validate_sensitive_target_path "$AGE_IDENTITY_FILE" "age identity" || \
+        fail "unsafe age identity target"
     [ -f "$KEYS_FILE" ] || fail "keys file missing: $KEYS_FILE"
     [ -f "$AGE_IDENTITY_FILE" ] || fail "age identity missing: $AGE_IDENTITY_FILE"
     age -d -i "$AGE_IDENTITY_FILE" "$KEYS_FILE"
@@ -291,6 +385,8 @@ validate_grant_name() {
 
 set_key_cmd() {
     ensure_dirs
+    validate_sensitive_target_path "$KEYS_FILE" "encrypted keys" || \
+        fail "unsafe encrypted keys target"
     [ "$#" -gt 0 ] || fail "usage: dkey set NAME VALUE | dkey set NAME=VALUE"
     case "$1" in
         *=*)
@@ -347,6 +443,8 @@ set_key_cmd() {
 
 init_cmd() {
     ensure_dirs
+    validate_sensitive_target_path "$KEYS_FILE" "encrypted keys" || \
+        fail "unsafe encrypted keys target"
     if [ ! -f "$GRANTS_FILE" ]; then
         sample_grants > "$GRANTS_FILE"
         info "created $GRANTS_FILE"
@@ -388,6 +486,8 @@ init_cmd() {
 
 edit_cmd() {
     ensure_dirs
+    validate_sensitive_target_path "$KEYS_FILE" "encrypted keys" || \
+        fail "unsafe encrypted keys target"
     editor="${EDITOR:-vi}"
     sensitive_begin
     DKEY_SENSITIVE_TMP_PRIMARY="$(mktemp "$SECRETS_DIR/.keys.env.XXXXXX")" || \
@@ -696,6 +796,21 @@ reset_cmd() {
                 reset_abort "refusing to rewrite Codex config with multiline TOML strings: $config_path"
             fi
             if [ -f "$config_path" ] && ! awk '
+                {
+                    compact = $0
+                    gsub(/[[:space:]]/, "", compact)
+                    single_quoted = sprintf("%c", 39) "model_providers" sprintf("%c", 39)
+                    if (compact ~ /^model_providers(\.|=)/ ||
+                        compact ~ /^"model_providers"(\.|=)/ ||
+                        (index(compact, single_quoted) == 1 &&
+                         substr(compact, length(single_quoted) + 1, 1) ~ /[.=]/)) {
+                        invalid = 1
+                    }
+                    if (substr(compact, 1, 1) == "\"" ||
+                        substr(compact, 1, 1) == sprintf("%c", 39)) {
+                        invalid = 1
+                    }
+                }
                 /^[[:space:]]*\[/ { in_table = 1 }
                 /^[[:space:]]*\[\[/ { invalid = 1 }
                 /=[[:space:]]*\[[[:space:]]*(#.*)?$/ { invalid = 1 }
@@ -963,35 +1078,61 @@ doctor_cmd() {
     command -v age >/dev/null 2>&1 && info "age found" || { warn "age missing"; problems=$((problems + 1)); }
     command -v age-keygen >/dev/null 2>&1 && info "age-keygen found" || { warn "age-keygen missing"; problems=$((problems + 1)); }
     command -v jq >/dev/null 2>&1 && info "jq found" || { warn "jq missing"; problems=$((problems + 1)); }
-    if [ ! -f "$AGE_IDENTITY_FILE" ]; then
-        warn "age identity missing: $AGE_IDENTITY_FILE"
+    identity_path_valid=1
+    validate_sensitive_target_path "$AGE_IDENTITY_FILE" "age identity" || {
         problems=$((problems + 1))
-    elif [ ! -s "$AGE_IDENTITY_FILE" ]; then
-        warn "age identity invalid: $AGE_IDENTITY_FILE"
-        problems=$((problems + 1))
-    elif command -v age-keygen >/dev/null 2>&1 && \
-        ! age-keygen -y "$AGE_IDENTITY_FILE" >/dev/null 2>&1; then
-        warn "age identity invalid: $AGE_IDENTITY_FILE"
-        problems=$((problems + 1))
-    elif command -v age-keygen >/dev/null 2>&1; then
-        info "age identity valid: $AGE_IDENTITY_FILE"
-    else
-        info "age identity exists; validation unavailable: $AGE_IDENTITY_FILE"
+        identity_path_valid=0
+    }
+    if [ "$identity_path_valid" -eq 1 ]; then
+        if [ ! -f "$AGE_IDENTITY_FILE" ]; then
+            warn "age identity missing: $AGE_IDENTITY_FILE"
+            problems=$((problems + 1))
+        elif [ ! -s "$AGE_IDENTITY_FILE" ]; then
+            warn "age identity invalid: $AGE_IDENTITY_FILE"
+            problems=$((problems + 1))
+        else
+            identity_mode="$(stat -f '%Lp' "$AGE_IDENTITY_FILE" 2>/dev/null || stat -c '%a' "$AGE_IDENTITY_FILE" 2>/dev/null || true)"
+            case "$identity_mode" in
+                [0-7]00) ;;
+                *)
+                    warn "age identity permissions expose group/other access: $AGE_IDENTITY_FILE"
+                    problems=$((problems + 1))
+                    ;;
+            esac
+            if command -v age-keygen >/dev/null 2>&1 && \
+                ! age-keygen -y "$AGE_IDENTITY_FILE" >/dev/null 2>&1; then
+                warn "age identity invalid: $AGE_IDENTITY_FILE"
+                problems=$((problems + 1))
+            elif command -v age-keygen >/dev/null 2>&1; then
+                info "age identity valid: $AGE_IDENTITY_FILE"
+            else
+                info "age identity exists; validation unavailable: $AGE_IDENTITY_FILE"
+            fi
+        fi
     fi
-    if [ ! -f "$KEYS_FILE" ]; then
-        warn "keys file missing: $KEYS_FILE"
+    keys_path_valid=1
+    validate_sensitive_target_path "$KEYS_FILE" "encrypted keys" || {
         problems=$((problems + 1))
-    elif [ ! -s "$KEYS_FILE" ]; then
-        warn "keys file is empty or cannot be decrypted: $KEYS_FILE"
-        problems=$((problems + 1))
-    elif command -v age >/dev/null 2>&1 && [ -s "$AGE_IDENTITY_FILE" ] && \
-        ! age -d -i "$AGE_IDENTITY_FILE" "$KEYS_FILE" >/dev/null 2>&1; then
-        warn "keys file is empty or cannot be decrypted: $KEYS_FILE"
-        problems=$((problems + 1))
-    elif command -v age >/dev/null 2>&1 && [ -s "$AGE_IDENTITY_FILE" ]; then
-        info "keys file decrypts: $KEYS_FILE"
-    else
-        info "keys file exists; decrypt check unavailable: $KEYS_FILE"
+        keys_path_valid=0
+    }
+    if [ "$keys_path_valid" -eq 1 ]; then
+        if [ ! -f "$KEYS_FILE" ]; then
+            warn "keys file missing: $KEYS_FILE"
+            problems=$((problems + 1))
+        elif [ ! -s "$KEYS_FILE" ]; then
+            warn "keys file is empty or cannot be decrypted: $KEYS_FILE"
+            problems=$((problems + 1))
+        elif command -v age >/dev/null 2>&1 && [ "$identity_path_valid" -eq 1 ] && \
+            [ -s "$AGE_IDENTITY_FILE" ] && \
+            ! age -d -i "$AGE_IDENTITY_FILE" "$KEYS_FILE" >/dev/null 2>&1; then
+            warn "keys file is empty or cannot be decrypted: $KEYS_FILE"
+            problems=$((problems + 1))
+        elif command -v age >/dev/null 2>&1 && [ "$identity_path_valid" -eq 1 ] && \
+            [ -s "$AGE_IDENTITY_FILE" ]; then
+            info "keys file decrypts: $KEYS_FILE"
+        else
+            info "keys file exists; decrypt check unavailable: $KEYS_FILE"
+        fi
     fi
     [ -f "$GRANTS_FILE" ] && info "grants file exists: $GRANTS_FILE" || {
         warn "grants file missing: $GRANTS_FILE"

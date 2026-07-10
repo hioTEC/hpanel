@@ -5,6 +5,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+YAML_SITE_PACKAGES="$(python3 -c 'from pathlib import Path; import yaml; print(Path(yaml.__file__).resolve().parents[1])')"
+export PYTHONPATH="$YAML_SITE_PACKAGES${PYTHONPATH:+:$PYTHONPATH}"
+
 export HOME="$TMP/home"
 mkdir -p "$HOME/.agents/.dotpanel"
 cp -R "$ROOT/bin" "$HOME/.agents/.dotpanel/bin"
@@ -258,7 +261,7 @@ SKILL
   fi
   grep -q 'has no description' "$TMP/dot-claude-invalid-description.out"
 done
-for invalid_description in 'foo: bar' '0x10'; do
+for invalid_description in 'foo: bar' '0x10' '00' $'foo:\tbar'; do
   cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<SKILL
 ---
 name: minimal
@@ -287,6 +290,143 @@ if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-invalid-block
   exit 1
 fi
 grep -q 'has no description' "$TMP/dot-claude-invalid-block-header.out"
+cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
+---
+name: minimal
+description: >2
+ text
+---
+
+# Minimal
+SKILL
+if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-invalid-block-indent.out" 2>&1; then
+  echo "FAIL: Claude renderer accepted invalid YAML block indentation" >&2
+  exit 1
+fi
+grep -q 'has no description' "$TMP/dot-claude-invalid-block-indent.out"
+cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
+---
+name: minimal
+description: Valid description.
+stray: [unterminated
+---
+
+# Minimal
+SKILL
+if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-malformed-extra-field.out" 2>&1; then
+  echo "FAIL: Claude renderer accepted malformed extra frontmatter" >&2
+  exit 1
+fi
+grep -q 'invalid frontmatter' "$TMP/dot-claude-malformed-extra-field.out"
+for quoted_description in '"0x10"' '"foo: bar"'; do
+  cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<SKILL
+---
+name: minimal
+description: $quoted_description
+---
+
+# Minimal
+SKILL
+  "$HOME/.agents/.dotpanel/bin/dot" set claude >/dev/null
+done
+cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
+---
+name: true
+description: Valid description.
+---
+
+# Minimal
+SKILL
+if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-non-string-name.out" 2>&1; then
+  echo "FAIL: Claude renderer accepted a non-string YAML name" >&2
+  exit 1
+fi
+grep -q 'invalid frontmatter' "$TMP/dot-claude-non-string-name.out"
+cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
+---
+name: "foo # bar"
+description: Valid description.
+---
+
+# Minimal
+SKILL
+if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-quoted-unsafe-name.out" 2>&1; then
+  echo "FAIL: Claude renderer truncated a quoted unsafe name" >&2
+  exit 1
+fi
+grep -q 'unsafe skill name: foo # bar' "$TMP/dot-claude-quoted-unsafe-name.out"
+for block_name_header in 'name : >-' '"name": >-' 'name: &canonical >-' 'name: !!str >-'; do
+  cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<SKILL
+---
+$block_name_header
+  minimal
+description: Valid description.
+---
+
+# Minimal
+SKILL
+  if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-block-name.out" 2>&1; then
+    echo "FAIL: Claude renderer accepted a block-scalar skill name: $block_name_header" >&2
+    exit 1
+  fi
+  grep -q 'invalid frontmatter' "$TMP/dot-claude-block-name.out"
+done
+cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
+---
+? name
+: >-
+  minimal
+description: Valid description.
+---
+
+# Minimal
+SKILL
+if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-explicit-block-name.out" 2>&1; then
+  echo "FAIL: Claude renderer accepted an explicit-key block-scalar skill name" >&2
+  exit 1
+fi
+grep -q 'invalid frontmatter' "$TMP/dot-claude-explicit-block-name.out"
+cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
+---
+ name: >-
+   minimal
+ description: Valid description.
+---
+
+# Minimal
+SKILL
+if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-indented-block-name.out" 2>&1; then
+  echo "FAIL: Claude renderer accepted an indented block-scalar skill name" >&2
+  exit 1
+fi
+grep -q 'invalid frontmatter' "$TMP/dot-claude-indented-block-name.out"
+cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
+---
+name: minimal
+description: "\uD800"
+---
+
+# Minimal
+SKILL
+if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-surrogate-description.out" 2>&1; then
+  echo "FAIL: Claude renderer accepted a non-UTF-8 YAML description" >&2
+  exit 1
+fi
+grep -q 'invalid frontmatter' "$TMP/dot-claude-surrogate-description.out"
+cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
+---
+name: minimal
+description: First description.
+description: Second description.
+---
+
+# Minimal
+SKILL
+if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-duplicate-description.out" 2>&1; then
+  echo "FAIL: Claude renderer accepted duplicate frontmatter descriptions" >&2
+  exit 1
+fi
+grep -q 'invalid frontmatter' "$TMP/dot-claude-duplicate-description.out"
 cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
 ---
 name: minimal # canonical
@@ -1077,10 +1217,176 @@ if command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1; then
   }
 
   "$HOME/.agents/.dotpanel/bin/dkey" keygen >/dev/null
+
+  mkdir -p "$TMP/dkey-symlink-home-real"
+  ln -s "$TMP/dkey-symlink-home-real" "$TMP/dkey-symlink-home"
+  if HOME="$TMP/dkey-symlink-home" \
+      "$HOME/.agents/.dotpanel/bin/dkey" keygen > "$TMP/dkey-symlink-home.out" 2>&1; then
+    echo "FAIL: dkey keygen accepted a symlinked HOME boundary" >&2
+    exit 1
+  fi
+  grep -q 'HOME boundary must not be symlinked' "$TMP/dkey-symlink-home.out"
+  test ! -e "$TMP/dkey-symlink-home-real/.config/age/key.txt"
+
+  mkdir -p "$TMP/dkey-failing-keygen-bin"
+  cat > "$TMP/dkey-failing-keygen-bin/age-keygen" <<'SH'
+#!/bin/sh
+printf 'synthetic partial private key\n'
+exit 9
+SH
+  chmod +x "$TMP/dkey-failing-keygen-bin/age-keygen"
+  if DKEY_AGE_IDENTITY_FILE="$TMP/failed-keygen-target" \
+      PATH="$TMP/dkey-failing-keygen-bin:$PATH" \
+      "$HOME/.agents/.dotpanel/bin/dkey" keygen > "$TMP/dkey-failing-keygen.out" 2>&1; then
+    echo "FAIL: dkey keygen accepted a failed age-keygen result" >&2
+    exit 1
+  fi
+  test ! -e "$TMP/failed-keygen-target"
+  test -z "$(find "$TMP" -maxdepth 1 -type f -name '.dkey-identity.*' -print -quit)"
+  rm -rf "$TMP/dkey-failing-keygen-bin"
+
+  mkdir -p "$TMP/dkey-relative-target-sandbox"
+  for invalid_sensitive_target in \
+      './relative-identity' \
+      '../traversal-identity' \
+      "$TMP//duplicate-separator-identity" \
+      "$TMP/path/../parent-traversal-identity"; do
+    if (cd "$TMP/dkey-relative-target-sandbox" && \
+        DKEY_AGE_IDENTITY_FILE="$invalid_sensitive_target" \
+        "$HOME/.agents/.dotpanel/bin/dkey" identity import "$HOME/.config/age/key.txt" --force) \
+        > "$TMP/dkey-invalid-sensitive-target.out" 2>&1; then
+      echo "FAIL: dkey accepted a non-normalized sensitive target: $invalid_sensitive_target" >&2
+      exit 1
+    fi
+    grep -q 'path must be absolute and lexically normalized' "$TMP/dkey-invalid-sensitive-target.out"
+  done
+
+  mkdir -p "$TMP/identity-directory-target" "$TMP/identity-symlink-outside"
+  if DKEY_AGE_IDENTITY_FILE="$TMP/identity-directory-target" \
+      "$HOME/.agents/.dotpanel/bin/dkey" identity import "$HOME/.config/age/key.txt" --force \
+      > "$TMP/dkey-identity-directory.out" 2>&1; then
+    echo "FAIL: dkey identity import accepted a directory target" >&2
+    exit 1
+  fi
+  grep -q 'age identity is not a regular file' "$TMP/dkey-identity-directory.out"
+  test -z "$(find "$TMP/identity-directory-target" -mindepth 1 -print -quit)"
+  ln -s "$TMP/identity-symlink-outside" "$TMP/identity-symlink-target"
+  if DKEY_AGE_IDENTITY_FILE="$TMP/identity-symlink-target" \
+      "$HOME/.agents/.dotpanel/bin/dkey" identity import "$HOME/.config/age/key.txt" --force \
+      > "$TMP/dkey-identity-symlink-directory.out" 2>&1; then
+    echo "FAIL: dkey identity import followed a symlink-to-directory target" >&2
+    exit 1
+  fi
+  grep -q 'age identity must not be symlinked' "$TMP/dkey-identity-symlink-directory.out"
+  test -z "$(find "$TMP/identity-symlink-outside" -mindepth 1 -print -quit)"
+
+  mkdir -p "$TMP/keys-directory-target" "$TMP/keys-symlink-outside"
+  if DKEY_KEYS_FILE="$TMP/keys-directory-target" \
+      "$HOME/.agents/.dotpanel/bin/dkey" set DIRECTORY_SECRET synthetic \
+      > "$TMP/dkey-set-directory-target.out" 2>&1; then
+    echo "FAIL: dkey set accepted an encrypted-key directory target" >&2
+    exit 1
+  fi
+  grep -q 'encrypted keys is not a regular file' "$TMP/dkey-set-directory-target.out"
+  test -z "$(find "$TMP/keys-directory-target" -mindepth 1 -print -quit)"
+  ln -s "$TMP/keys-symlink-outside" "$TMP/keys-symlink-target"
+  if DKEY_KEYS_FILE="$TMP/keys-symlink-target" \
+      "$HOME/.agents/.dotpanel/bin/dkey" set DIRECTORY_SECRET synthetic \
+      > "$TMP/dkey-set-symlink-directory.out" 2>&1; then
+    echo "FAIL: dkey set followed an encrypted-key symlink-to-directory" >&2
+    exit 1
+  fi
+  grep -q 'encrypted keys must not be symlinked' "$TMP/dkey-set-symlink-directory.out"
+  test -z "$(find "$TMP/keys-symlink-outside" -mindepth 1 -print -quit)"
+
+  mkdir -p "$TMP/dkey-identity-race-bin"
+  cat > "$TMP/dkey-identity-race-bin/age-keygen" <<'SH'
+#!/bin/sh
+if [ "${1:-}" = '-y' ]; then
+  printf 'intruder identity target\n' > "$DKEY_TEST_IDENTITY_RACE_TARGET"
+fi
+exec "$DKEY_TEST_REAL_AGE_KEYGEN" "$@"
+SH
+  chmod +x "$TMP/dkey-identity-race-bin/age-keygen"
+  if DKEY_AGE_IDENTITY_FILE="$TMP/raced-identity-target" \
+      DKEY_TEST_IDENTITY_RACE_TARGET="$TMP/raced-identity-target" \
+      DKEY_TEST_REAL_AGE_KEYGEN="$(command -v age-keygen)" \
+      PATH="$TMP/dkey-identity-race-bin:$PATH" \
+      "$HOME/.agents/.dotpanel/bin/dkey" identity import "$HOME/.config/age/key.txt" \
+      > "$TMP/dkey-identity-race.out" 2>&1; then
+    echo "FAIL: dkey identity import overwrote a target that appeared during validation" >&2
+    exit 1
+  fi
+  grep -q 'age identity appeared during import' "$TMP/dkey-identity-race.out"
+  grep -qxF 'intruder identity target' "$TMP/raced-identity-target"
+  test -z "$(find "$TMP" -maxdepth 1 -type f -name '.dkey-identity.*' -print -quit)"
+  rm "$TMP/raced-identity-target"
+  if DKEY_AGE_IDENTITY_FILE="$TMP/raced-identity-target" \
+      DKEY_TEST_IDENTITY_RACE_TARGET="$TMP/raced-identity-target" \
+      DKEY_TEST_REAL_AGE_KEYGEN="$(command -v age-keygen)" \
+      PATH="$TMP/dkey-identity-race-bin:$PATH" \
+      "$HOME/.agents/.dotpanel/bin/dkey" identity import "$HOME/.config/age/key.txt" --force \
+      > "$TMP/dkey-identity-force-race.out" 2>&1; then
+    echo "FAIL: dkey --force overwrote an identity target that appeared during validation" >&2
+    exit 1
+  fi
+  grep -q 'age identity appeared during import' "$TMP/dkey-identity-force-race.out"
+  grep -qxF 'intruder identity target' "$TMP/raced-identity-target"
+  test -z "$(find "$TMP" -maxdepth 1 -type f -name '.dkey-identity.*' -print -quit)"
+  rm -rf "$TMP/dkey-identity-race-bin"
+
+  mkdir -p "$TMP/dkey-encrypt-race-bin"
+  cat > "$TMP/dkey-encrypt-race-bin/age" <<'SH'
+#!/bin/sh
+"$DKEY_TEST_REAL_AGE" "$@"
+age_status=$?
+printf 'intruder encrypted target\n' > "$DKEY_TEST_ENCRYPT_RACE_TARGET"
+exit "$age_status"
+SH
+  chmod +x "$TMP/dkey-encrypt-race-bin/age"
+  if DKEY_KEYS_FILE="$TMP/raced-keys-target.age" \
+      DKEY_TEST_ENCRYPT_RACE_TARGET="$TMP/raced-keys-target.age" \
+      DKEY_TEST_REAL_AGE="$(command -v age)" \
+      PATH="$TMP/dkey-encrypt-race-bin:$PATH" \
+      "$HOME/.agents/.dotpanel/bin/dkey" set RACE_SECRET synthetic \
+      > "$TMP/dkey-encrypt-race.out" 2>&1; then
+    echo "FAIL: dkey set overwrote a target that appeared during encryption" >&2
+    exit 1
+  fi
+  grep -q 'encrypted keys target appeared during encryption' "$TMP/dkey-encrypt-race.out"
+  grep -qxF 'intruder encrypted target' "$TMP/raced-keys-target.age"
+  test -z "$(find "$TMP" -maxdepth 1 -type f -name 'raced-keys-target.age.dkey-encrypt.*' -print -quit)"
+  rm -rf "$TMP/dkey-encrypt-race-bin"
+
   "$HOME/.agents/.dotpanel/bin/dkey" set TEST_SECRET ok
   assert_no_sensitive_dkey_temps
   EDITOR=true "$HOME/.agents/.dotpanel/bin/dkey" edit >/dev/null
   assert_no_sensitive_dkey_temps
+
+  ln -s "$HOME/.config/age/key.txt" "$TMP/doctor-identity-link"
+  if DKEY_AGE_IDENTITY_FILE="$TMP/doctor-identity-link" \
+      "$HOME/.agents/.dotpanel/bin/dkey" doctor > "$TMP/dkey-doctor-identity-link.out" 2>&1; then
+    echo "FAIL: dkey doctor accepted a symlinked identity" >&2
+    exit 1
+  fi
+  grep -q 'age identity must not be symlinked' "$TMP/dkey-doctor-identity-link.out"
+  rm "$TMP/doctor-identity-link"
+  ln -s "$HOME/.agents/secrets/keys.env.age" "$TMP/doctor-keys-link.age"
+  if DKEY_KEYS_FILE="$TMP/doctor-keys-link.age" \
+      "$HOME/.agents/.dotpanel/bin/dkey" doctor > "$TMP/dkey-doctor-keys-link.out" 2>&1; then
+    echo "FAIL: dkey doctor accepted a symlinked encrypted-key file" >&2
+    exit 1
+  fi
+  grep -q 'encrypted keys must not be symlinked' "$TMP/dkey-doctor-keys-link.out"
+  rm "$TMP/doctor-keys-link.age"
+  cp "$HOME/.config/age/key.txt" "$TMP/doctor-world-readable-identity"
+  chmod 644 "$TMP/doctor-world-readable-identity"
+  if DKEY_AGE_IDENTITY_FILE="$TMP/doctor-world-readable-identity" \
+      "$HOME/.agents/.dotpanel/bin/dkey" doctor > "$TMP/dkey-doctor-identity-mode.out" 2>&1; then
+    echo "FAIL: dkey doctor accepted group/other-readable identity permissions" >&2
+    exit 1
+  fi
+  grep -q 'age identity permissions expose group/other access' "$TMP/dkey-doctor-identity-mode.out"
 
   cp "$HOME/.agents/secrets/keys.env.age" "$TMP/keys-before-failed-encrypt.age"
   mkdir -p "$TMP/dkey-failing-age-bin"
@@ -1575,6 +1881,24 @@ TOML
   grep -q 'refusing unsupported Codex TOML table/bracket syntax' "$TMP/dkey-reset-dotted-provider.out"
   cmp -s "$TMP/dotted-provider-config-before.toml" "$HOME/.codex/config.toml"
   cmp -s "$TMP/dotted-provider-auth-before.json" "$HOME/.codex/auth.json"
+  for dotted_provider_line in \
+      'model_providers . ok . name = "Managed"' \
+      '"model_providers".ok.name = "Managed"' \
+      "'model_providers'.ok.name = \"Managed\"" \
+      '"model\u005fproviders".ok.name = "Managed"'; do
+    printf 'model_provider = "ok"\nmodel = "managed-model"\n%s\n' \
+      "$dotted_provider_line" > "$HOME/.codex/config.toml"
+    printf '{"auth_mode":"apikey","OPENAI_API_KEY":"legacy-placeholder"}\n' > "$HOME/.codex/auth.json"
+    cp "$HOME/.codex/config.toml" "$TMP/dotted-provider-variant-before.toml"
+    cp "$HOME/.codex/auth.json" "$TMP/dotted-provider-variant-auth-before.json"
+    if "$HOME/.agents/.dotpanel/bin/dkey" reset codex > "$TMP/dkey-reset-dotted-provider-variant.out" 2>&1; then
+      echo "FAIL: dkey reset partially rewrote a dotted provider key variant" >&2
+      exit 1
+    fi
+    grep -q 'refusing unsupported Codex TOML table/bracket syntax' "$TMP/dkey-reset-dotted-provider-variant.out"
+    cmp -s "$TMP/dotted-provider-variant-before.toml" "$HOME/.codex/config.toml"
+    cmp -s "$TMP/dotted-provider-variant-auth-before.json" "$HOME/.codex/auth.json"
+  done
   cat > "$HOME/.codex/config.toml" <<'TOML'
 model_provider = "ok"
 model = "managed-model"

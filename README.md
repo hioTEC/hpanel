@@ -29,17 +29,19 @@ Dependencies:
 - `git`
 - `age` and `age-keygen` (from the `age` package)
 - `jq`
+- Python 3 with `PyYAML` (for exact skill-frontmatter validation)
 
 Debian/Ubuntu:
 
 ```bash
-sudo apt-get install -y git age jq
+sudo apt-get install -y git age jq python3 python3-yaml
 ```
 
 macOS:
 
 ```bash
 brew install git age jq
+python3 -m pip install PyYAML
 ```
 
 Fresh machine without an existing memspace:
@@ -236,6 +238,15 @@ dkey list
 `dkey set`, `dkey edit`, and identity import keep sensitive intermediates in
 random `0600` files and remove them on success, failure, or HUP/INT/TERM. The
 encrypted keys or identity target is replaced only after validation succeeds.
+Sensitive target overrides must be absolute and lexically normalized;
+directories, symlinks, and symlinked mutation boundaries are refused. `dkey
+doctor` applies the same path checks and rejects age identities exposed to
+group or other users.
+
+The implementation is portable POSIX shell: it revalidates immediately before
+the final rename, but cannot make validation plus rename descriptor-relative.
+Do not let another same-user process concurrently replace the validated parent
+directories while a mutation is running.
 
 It can inject those secrets into one command:
 

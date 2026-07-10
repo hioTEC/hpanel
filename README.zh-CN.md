@@ -53,7 +53,7 @@ sh ~/.agents/.dotpanel/bin/dot init
 已有 memspace repo 的机器：
 
 ```bash
-git clone <your-agents-repo> ~/.agents
+git clone --recurse-submodules <your-agents-repo> ~/.agents
 git clone https://github.com/hioTEC/dotpanel.git ~/.agents/.dotpanel
 sh ~/.agents/.dotpanel/bin/dot init --no-entry
 ```
@@ -117,8 +117,8 @@ dot sync push
 `dot sync push` 只 push 已存在的 commits。只要有 staged、unstaged 或
 untracked files，它就会拒绝执行；它绝不会替你 stage 或 commit。请先明确
 commit 要分享的路径，再运行这个命令。`dot sync pull` 会先显示 status 并
-fetch，然后要求 worktree clean 且可以 fast-forward，成功更新后才重新渲染
-harness files。
+fetch，然后要求 worktree clean 且可以 fast-forward，再递归初始化/更新
+submodules；只有这些步骤全部成功后才重新渲染 harness files。
 
 按单次调用切换 AI backend（读取 `~/.agents/secrets/dkey.providers.json`，
 需要 key 时通过 `llm-backends` grant 注入）：
@@ -145,11 +145,60 @@ dot self update
 - `dot set` 从 `~/.agents/AGENTS.md` 渲染最小 harness entry。
 - `dot sync` 在 `~/.agents` 里执行 git 同步。
 - `dot self` 在 `~/.agents/.dotpanel` 里执行 git 同步。
-- `dot doctor` 检查 entry 是否存在，以及生成的 wrappers 和 Claude plugins
-  是否与 source render 完全一致；这些一致性错误会返回非零状态。
+- `dot doctor` 检查 entry 是否存在，以及生成的 wrappers、Claude plugins 和
+  declared Codex aliases 是否与 source render 完全一致；这些一致性错误会
+  返回非零状态。
 
 渲染出来的 harness entry 故意很小。它们只告诉 harness 去读
 `~/.agents/AGENTS.md`，不会复制你的私有规则。
+
+### 可选的 Codex skill aliases
+
+如果存在 `~/.agents/skills/sources.json`，`dot set codex` 和
+`dot configure --harness codex` 也会 reconcile 简短的 Codex skill aliases。
+最小的 version 1 manifest 如下：
+
+```json
+{
+  "version": 1,
+  "alias_adapter": {
+    "owner": "dotpanel",
+    "destination": "~/.codex/skills",
+    "renderer": "dot set codex",
+    "retired_aliases": ["old-name"]
+  },
+  "aliases": [
+    {
+      "id": "plan",
+      "source": "local",
+      "skill": "plan-discussion",
+      "target": "plan-discussion/SKILL.md",
+      "description": "Use for structured planning and architecture choices.",
+      "guidance": "Keep the resulting design proposed until operator sign-off."
+    }
+  ],
+  "sources": [
+    {"id": "local", "paths": ["skills/local"]}
+  ]
+}
+```
+
+只有 manifest 本身是普通、非 symlink 文件，且 `owner`、`destination` 和
+`renderer` 与上例完全一致时才启用 adapter。
+
+每个被 alias 引用的 source 必须解析为 memspace 内唯一的相对目录，而且
+declared source directory 本身不能是 symlink；target 必须是该 source 内普通且
+非 symlink 的文件。每个 alias 必须提供单行 `description`，也可以提供单行
+alias-specific `guidance`，每项最多 500 characters；control characters 和
+multiline values 会被拒绝。生成的 `~/.codex/skills/<id>/SKILL.md` 使用这些
+discovery metadata，并链接 canonical file，不复制 instructions 或 bundled
+resources。
+
+生成的 alias 带有 dot ownership banner。Reconcile 遇到同名但无 banner 的
+目录会拒绝覆盖；stale 或 retired 目录也只有带 banner 时才会删除，其他 Codex
+skills 保持不变。`dot unset codex` 遵守相同 ownership rule。`dot doctor` 会
+报告 missing alias、content drift 和 stale dot-managed alias。manifest 不存在
+时，普通 Codex entry rendering 行为不变。
 
 ## `dkey` 做什么
 
@@ -204,6 +253,8 @@ Provider registry 位于 `~/.agents/secrets/dkey.providers.json`。参见
 - `~/.claude/CLAUDE.md`
 - `~/.codex/AGENTS.md`
 - `~/.kimi/AGENTS.md`
+- manifest `~/.agents/skills/sources.json` 声明的
+  `~/.codex/skills/<alias>/SKILL.md`
 
 `dkey init` 可能创建：
 
@@ -218,8 +269,8 @@ Provider registry 位于 `~/.agents/secrets/dkey.providers.json`。参见
 - `~/.agents/.dotpanel` 是受管理的公开 checkout，应该被 memspace repo 忽略。
 - `dot sync push` 会拒绝 dirty memspace，只 push 已存在的 commits；它绝不
   stage 或 commit files。
-- `dot sync pull` 会先 fetch，再执行 clean-worktree 与 fast-forward-only gate；
-  只有更新成功后才渲染 harness files。
+- `dot sync pull` 会先 fetch，再执行 clean-worktree 与 fast-forward-only gate，
+  然后递归初始化/更新 submodules；只有全部更新成功后才渲染 harness files。
 - `dot self update` 会拒绝 dirty managed checkout。
 - `dkey` 是 privileged 工具；subagent 或不该看到 secret 的脚本不要调用它。
 

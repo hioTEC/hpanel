@@ -9,6 +9,11 @@
   without rewriting global harness config or Codex auth state.
 
 ### Added
+- Optional Codex skill alias rendering from `~/.agents/skills/sources.json`.
+  Generated adapters link to safely resolved canonical skills, carry an
+  ownership banner, preserve alias-specific discovery/guidance metadata, and
+  are checked by `dot doctor`. Rendering and unset refuse to overwrite or
+  delete unmanaged Codex skills.
 - `dkey grants` surfaced in `dkey help`/README, and now prints the env vars each
   grant injects (never secret values); `grant not found` errors list available grants.
 - `dkey identity import PATH [--force]` and `dkey identity import --stdin [--force]`
@@ -25,7 +30,8 @@
 - `dot sync push` no longer stages or commits memspace changes. It now refuses
   dirty worktrees and pushes existing commits only.
 - `dot sync pull` now reports status, fetches, enforces clean-worktree and
-  fast-forward-only gates, and renders harness outputs only after success.
+  fast-forward-only gates, recursively initializes/updates submodules, and
+  renders harness outputs only after success.
 - `dot self update` now refuses dirty managed checkouts before pulling.
 - `dot doctor` now exits non-zero for a missing memspace entry, any wrapper
   content drift, or generated Claude plugins that differ from their source

@@ -51,9 +51,9 @@ changes. It renders the managed Claude, Codex, and Kimi entry files. Use
 
 Use `dot sync status`, `dot sync diff`, `dot sync pull`, and `dot sync push` to
 move the memspace repo across machines. `dot sync pull` fetches, requires a
-clean worktree and a fast-forward path, then re-renders entries. `dot sync push`
-requires a clean worktree and pushes existing commits only; it never stages or
-commits files.
+clean worktree and a fast-forward path, recursively initializes/updates
+submodules, then re-renders entries. `dot sync push` requires a clean worktree
+and pushes existing commits only; it never stages or commits files.
 
 Use `dkey keygen` once to create the local age identity. Use
 `dkey set NAME VALUE` or `dkey set NAME=VALUE` to create or overwrite encrypted

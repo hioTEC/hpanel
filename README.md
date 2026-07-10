@@ -53,7 +53,7 @@ sh ~/.agents/.dotpanel/bin/dot init
 Machine with an existing memspace repo:
 
 ```bash
-git clone <your-agents-repo> ~/.agents
+git clone --recurse-submodules <your-agents-repo> ~/.agents
 git clone https://github.com/hioTEC/dotpanel.git ~/.agents/.dotpanel
 sh ~/.agents/.dotpanel/bin/dot init --no-entry
 ```
@@ -118,8 +118,9 @@ dot sync push
 `dot sync push` pushes existing commits only. It refuses staged, unstaged, or
 untracked files and never stages or commits them. Commit the exact paths you
 intend to share before running it. `dot sync pull` prints status, fetches, then
-requires a clean worktree and a fast-forward path before updating and
-re-rendering harness files.
+requires a clean worktree and a fast-forward path. After the fast-forward it
+recursively initializes/updates submodules. Harness files are rendered only
+after those steps succeed.
 
 Switch AI backends per invocation (reads `~/.agents/secrets/dkey.providers.json`
 and injects keys with the `llm-backends` grant when needed):
@@ -146,12 +147,63 @@ dot self update
 - `dot set` renders minimal harness entry files from `~/.agents/AGENTS.md`.
 - `dot sync` runs git operations in `~/.agents`.
 - `dot self` runs git operations in `~/.agents/.dotpanel`.
-- `dot doctor` checks that the entry exists and generated wrappers and Claude
-  plugins exactly match their source render. These coherence failures return a
-  non-zero status.
+- `dot doctor` checks that the entry exists and generated wrappers, Claude
+  plugins, and declared Codex aliases exactly match their source render. These
+  coherence failures return a non-zero status.
 
 Rendered harness entries are deliberately tiny. They tell the harness to read
 `~/.agents/AGENTS.md`; they do not duplicate your private rules.
+
+### Optional Codex skill aliases
+
+`dot set codex` and `dot configure --harness codex` also reconcile short Codex
+skill aliases when `~/.agents/skills/sources.json` exists. A minimal version 1
+manifest looks like this:
+
+```json
+{
+  "version": 1,
+  "alias_adapter": {
+    "owner": "dotpanel",
+    "destination": "~/.codex/skills",
+    "renderer": "dot set codex",
+    "retired_aliases": ["old-name"]
+  },
+  "aliases": [
+    {
+      "id": "plan",
+      "source": "local",
+      "skill": "plan-discussion",
+      "target": "plan-discussion/SKILL.md",
+      "description": "Use for structured planning and architecture choices.",
+      "guidance": "Keep the resulting design proposed until operator sign-off."
+    }
+  ],
+  "sources": [
+    {"id": "local", "paths": ["skills/local"]}
+  ]
+}
+```
+
+The adapter is enabled only when the manifest is a regular, non-symlinked file
+and `owner`, `destination`, and `renderer` exactly match the values above.
+
+Each referenced alias source must resolve to exactly one relative directory
+inside the memspace and the declared source directory itself must not be a
+symlink. Its target must be a regular, non-symlinked file inside that source.
+Every alias supplies its own one-line `description` and may add one-line
+alias-specific `guidance`; each is capped at 500 characters. Control characters
+and multiline values are rejected. The generated
+`~/.codex/skills/<id>/SKILL.md` uses that discovery metadata and links to the
+canonical file instead of copying its instructions or bundled resources.
+
+Generated aliases carry a dot ownership banner. Reconciliation refuses to
+overwrite a matching directory without that banner, removes stale or retired
+directories only when they carry the banner, and leaves all unrelated Codex
+skills untouched. `dot unset codex` follows the same ownership rule.
+`dot doctor` reports missing aliases, content drift, and stale dot-managed
+aliases.
+Without the manifest, normal Codex entry rendering remains unchanged.
 
 ## What `dkey` Does
 
@@ -205,6 +257,8 @@ See [PROVIDERS.md](PROVIDERS.md) for the provider schema and a template at
 - `~/.claude/CLAUDE.md`
 - `~/.codex/AGENTS.md`
 - `~/.kimi/AGENTS.md`
+- `~/.codex/skills/<alias>/SKILL.md` when declared by
+  `~/.agents/skills/sources.json`
 
 `dkey init` may create:
 
@@ -220,8 +274,9 @@ See [PROVIDERS.md](PROVIDERS.md) for the provider schema and a template at
   the memspace repo.
 - `dot sync push` refuses a dirty memspace and pushes existing commits only; it
   never stages or commits files.
-- `dot sync pull` fetches before its clean-worktree and fast-forward-only gates;
-  harness files are rendered only after a successful update.
+- `dot sync pull` fetches before its clean-worktree and fast-forward-only gates,
+  then recursively initializes/updates submodules; harness files are rendered
+  only after all updates succeed.
 - `dot self update` refuses a dirty managed checkout.
 - `dkey` is privileged; do not use it from subagents or scripts that should not
   see secrets.

@@ -154,6 +154,11 @@ dot self update
 渲染出来的 harness entry 故意很小。它们只告诉 harness 去读
 `~/.agents/AGENTS.md`，不会复制你的私有规则。
 
+shell rc 修改采用 fail-closed：`dot set path` / `dot unset path` 会拒绝 symlink
+或非普通 rc file，写入前重新检查 mutation boundary，保留已有文件的 mode，并在
+failure 或 signal 后清理同目录 rewrite temp。`DOT_SHELL_RC` 与 `ZDOTDIR` 仍可把
+rc 明确放到 `HOME` 之外。
+
 Claude plugin renderer 只接受 path-safe skill ID、恰好一组 `name` / `description`
 且已闭合的 frontmatter，以及不含 symlink 的 source tree。生成目录带普通文件
 `.dotpanel-owner`；reconcile、doctor 和 unset 都依赖该 marker。完全匹配旧版 dot
@@ -220,6 +225,10 @@ dkey set NAME VALUE
 dkey set NAME=VALUE
 dkey list
 ```
+
+`dkey set`、`dkey edit` 和 identity import 的敏感中间内容只写入随机 `0600`
+temp，并在 success、failure 或 HUP/INT/TERM 后清理；只有验证成功后才替换 encrypted
+keys 或 identity target。
 
 把 secret 只注入到一次命令：
 

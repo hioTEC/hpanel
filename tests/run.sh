@@ -29,6 +29,110 @@ cmp -s "$template_home/.agents/AGENTS.md" "$fallback_home/.agents/AGENTS.md"
 grep -q 'Add a route only after its target' "$template_home/.agents/AGENTS.md"
 
 sh "$HOME/.agents/.dotpanel/bin/dot" init --yes
+
+dot_env_line="[ -f \"$HOME/.agents/.dotpanel/env.sh\" ] && . \"$HOME/.agents/.dotpanel/env.sh\""
+printf 'outside shell rc target\n%s\n' "$dot_env_line" > "$TMP/outside-shell-rc"
+cp "$TMP/outside-shell-rc" "$TMP/outside-shell-rc-before"
+ln -s "$TMP/outside-shell-rc" "$TMP/symlink-shell-rc"
+if DOT_SHELL_RC="$TMP/symlink-shell-rc" "$HOME/.agents/.dotpanel/bin/dot" set path \
+    > "$TMP/dot-set-symlink-rc.out" 2>&1; then
+  echo "FAIL: dot set path followed a symlinked shell rc" >&2
+  exit 1
+fi
+grep -q 'shell rc must not be symlinked' "$TMP/dot-set-symlink-rc.out"
+test -L "$TMP/symlink-shell-rc"
+cmp -s "$TMP/outside-shell-rc-before" "$TMP/outside-shell-rc"
+if DOT_SHELL_RC="$TMP/symlink-shell-rc" "$HOME/.agents/.dotpanel/bin/dot" unset path \
+    > "$TMP/dot-unset-symlink-rc.out" 2>&1; then
+  echo "FAIL: dot unset path replaced a symlinked shell rc" >&2
+  exit 1
+fi
+grep -q 'shell rc must not be symlinked' "$TMP/dot-unset-symlink-rc.out"
+test -L "$TMP/symlink-shell-rc"
+cmp -s "$TMP/outside-shell-rc-before" "$TMP/outside-shell-rc"
+rm "$TMP/symlink-shell-rc"
+
+printf 'private shell rc marker\n' > "$TMP/private-shell-rc"
+chmod 600 "$TMP/private-shell-rc"
+DOT_SHELL_RC="$TMP/private-shell-rc" "$HOME/.agents/.dotpanel/bin/dot" set path >/dev/null
+private_rc_mode="$(stat -f '%Lp' "$TMP/private-shell-rc" 2>/dev/null || stat -c '%a' "$TMP/private-shell-rc")"
+test "$private_rc_mode" = '600'
+DOT_SHELL_RC="$TMP/private-shell-rc" "$HOME/.agents/.dotpanel/bin/dot" unset path >/dev/null
+private_rc_mode="$(stat -f '%Lp' "$TMP/private-shell-rc" 2>/dev/null || stat -c '%a' "$TMP/private-shell-rc")"
+test "$private_rc_mode" = '600'
+grep -qxF 'private shell rc marker' "$TMP/private-shell-rc"
+! grep -qxF "$dot_env_line" "$TMP/private-shell-rc"
+"$HOME/.agents/.dotpanel/bin/dot" set path >/dev/null
+
+mkfifo "$TMP/fifo-shell-rc"
+if DOT_SHELL_RC="$TMP/fifo-shell-rc" "$HOME/.agents/.dotpanel/bin/dot" set path \
+    > "$TMP/dot-set-fifo-rc.out" 2>&1; then
+  echo "FAIL: dot set path accepted a FIFO shell rc" >&2
+  exit 1
+fi
+grep -q 'shell rc is not a regular file' "$TMP/dot-set-fifo-rc.out"
+rm "$TMP/fifo-shell-rc"
+
+printf 'signal shell rc marker\n%s\n' "$dot_env_line" > "$TMP/signal-shell-rc"
+cp "$TMP/signal-shell-rc" "$TMP/signal-shell-rc-before"
+mkdir -p "$TMP/dot-rc-signal-bin"
+cat > "$TMP/dot-rc-signal-bin/mv" <<'SH'
+#!/bin/sh
+last=""
+for argument in "$@"; do last="$argument"; done
+if [ "$last" = "$DOT_TEST_SIGNAL_RC" ]; then
+  kill -TERM "$PPID"
+  exit 0
+fi
+exec /bin/mv "$@"
+SH
+chmod +x "$TMP/dot-rc-signal-bin/mv"
+if DOT_TEST_SIGNAL_RC="$TMP/signal-shell-rc" DOT_SHELL_RC="$TMP/signal-shell-rc" \
+    PATH="$TMP/dot-rc-signal-bin:$PATH" "$HOME/.agents/.dotpanel/bin/dot" unset path \
+    > "$TMP/dot-unset-rc-signal.out" 2>&1; then
+  echo "FAIL: dot unset path continued after TERM" >&2
+  exit 1
+else
+  dot_unset_rc_signal_status=$?
+fi
+test "$dot_unset_rc_signal_status" -eq 143
+cmp -s "$TMP/signal-shell-rc-before" "$TMP/signal-shell-rc"
+test -z "$(find "$TMP" -maxdepth 1 -type f -name '.dotpanel-rc*' -print -quit)"
+rm -rf "$TMP/dot-rc-signal-bin"
+
+mkdir -p "$TMP/dot-rc-root-race-bin"
+cat > "$TMP/dot-rc-root-race-bin/mkdir" <<'SH'
+#!/bin/sh
+last=""
+for argument in "$@"; do last="$argument"; done
+if [ "$last" = "$DOT_TEST_RC_PARENT" ] && [ ! -e "$DOT_TEST_RC_SWAP_MARKER" ]; then
+  /bin/mkdir "$@" || exit 1
+  /bin/mv "$DOT_TEST_RC_PARENT" "$DOT_TEST_RC_SAVED"
+  /bin/mkdir -p "$DOT_TEST_RC_OUTSIDE"
+  /bin/ln -s "$DOT_TEST_RC_OUTSIDE" "$DOT_TEST_RC_PARENT"
+  : > "$DOT_TEST_RC_SWAP_MARKER"
+  exit 0
+fi
+exec /bin/mkdir "$@"
+SH
+chmod +x "$TMP/dot-rc-root-race-bin/mkdir"
+export DOT_TEST_RC_PARENT="$TMP/rc-root-race/config"
+export DOT_TEST_RC_SAVED="$TMP/rc-root-race-saved"
+export DOT_TEST_RC_OUTSIDE="$TMP/rc-root-race-outside"
+export DOT_TEST_RC_SWAP_MARKER="$TMP/rc-root-race-triggered"
+if DOT_SHELL_RC="$DOT_TEST_RC_PARENT/.zshrc" PATH="$TMP/dot-rc-root-race-bin:$PATH" \
+    "$HOME/.agents/.dotpanel/bin/dot" set path > "$TMP/dot-set-rc-root-race.out" 2>&1; then
+  echo "FAIL: dot set path wrote through a swapped shell rc parent" >&2
+  exit 1
+fi
+grep -q 'shell rc path contains a symlink' "$TMP/dot-set-rc-root-race.out"
+test -L "$DOT_TEST_RC_PARENT"
+test ! -e "$DOT_TEST_RC_OUTSIDE/.zshrc"
+rm "$DOT_TEST_RC_PARENT"
+/bin/mv "$DOT_TEST_RC_SAVED" "$DOT_TEST_RC_PARENT"
+rm -rf "$TMP/dot-rc-root-race-bin" "$DOT_TEST_RC_OUTSIDE"
+unset DOT_TEST_RC_PARENT DOT_TEST_RC_SAVED DOT_TEST_RC_OUTSIDE DOT_TEST_RC_SWAP_MARKER
+
 printf '# Test memspace\n' > "$HOME/.agents/AGENTS.md"
 mkdir -p "$HOME/.agents/skills/hio/minimal"
 cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
@@ -154,6 +258,35 @@ SKILL
   fi
   grep -q 'has no description' "$TMP/dot-claude-invalid-description.out"
 done
+for invalid_description in 'foo: bar' '0x10'; do
+  cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<SKILL
+---
+name: minimal
+description: $invalid_description
+---
+
+# Minimal
+SKILL
+  if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-non-string-description.out" 2>&1; then
+    echo "FAIL: Claude renderer accepted a non-string YAML description: $invalid_description" >&2
+    exit 1
+  fi
+  grep -q 'has no description' "$TMP/dot-claude-non-string-description.out"
+done
+cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
+---
+name: minimal
+description: >++
+  Invalid block scalar header.
+---
+
+# Minimal
+SKILL
+if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-invalid-block-header.out" 2>&1; then
+  echo "FAIL: Claude renderer accepted an invalid block scalar header" >&2
+  exit 1
+fi
+grep -q 'has no description' "$TMP/dot-claude-invalid-block-header.out"
 cat > "$HOME/.agents/skills/hio/minimal/SKILL.md" <<'SKILL'
 ---
 name: minimal # canonical
@@ -219,7 +352,7 @@ if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-claude-parent-symlin
   echo "FAIL: Claude renderer followed a symlinked config root" >&2
   exit 1
 fi
-grep -q 'Claude config root must not be symlinked' "$TMP/dot-claude-parent-symlink.out"
+grep -q 'path contains a symlink\|root must not be symlinked' "$TMP/dot-claude-parent-symlink.out"
 test -L "$HOME/.claude"
 rm "$HOME/.claude"
 mv "$TMP/claude-config-real" "$HOME/.claude"
@@ -254,7 +387,7 @@ if "$HOME/.agents/.dotpanel/bin/dot" set codex > "$TMP/dot-codex-parent-symlink.
   echo "FAIL: Codex renderer followed a symlinked config root" >&2
   exit 1
 fi
-grep -q 'Codex config root must not be symlinked' "$TMP/dot-codex-parent-symlink.out"
+grep -q 'path contains a symlink\|root must not be symlinked' "$TMP/dot-codex-parent-symlink.out"
 test -L "$HOME/.codex"
 rm "$HOME/.codex"
 mv "$TMP/codex-config-real" "$HOME/.codex"
@@ -270,14 +403,64 @@ if "$HOME/.agents/.dotpanel/bin/dot" set kimi > "$TMP/dot-kimi-parent-symlink.ou
   echo "FAIL: Kimi renderer followed a symlinked config root" >&2
   exit 1
 fi
-grep -q 'Kimi config root must not be symlinked' "$TMP/dot-kimi-parent-symlink.out"
+grep -q 'path contains a symlink\|root must not be symlinked' "$TMP/dot-kimi-parent-symlink.out"
 if "$HOME/.agents/.dotpanel/bin/dot" doctor > "$TMP/dot-doctor-kimi-parent-symlink.out" 2>&1; then
   echo "FAIL: dot doctor followed a symlinked Kimi config root" >&2
   exit 1
 fi
-grep -q 'Kimi config root must not be symlinked' "$TMP/dot-doctor-kimi-parent-symlink.out"
+grep -q 'path contains a symlink\|root must not be symlinked' "$TMP/dot-doctor-kimi-parent-symlink.out"
 rm "$HOME/.kimi"
 mv "$TMP/kimi-config-real" "$HOME/.kimi"
+
+mkdir -p "$TMP/dot-root-race-bin"
+cat > "$TMP/dot-root-race-bin/mkdir" <<'SH'
+#!/bin/sh
+last=""
+for argument in "$@"; do last="$argument"; done
+if [ "$last" = "$DOT_TEST_SWAP_TRIGGER" ] && [ ! -e "$DOT_TEST_SWAP_MARKER" ]; then
+  /bin/mv "$DOT_TEST_SWAP_ROOT" "$DOT_TEST_SWAP_SAVED"
+  /bin/mkdir -p "$DOT_TEST_SWAP_OUTSIDE"
+  /bin/ln -s "$DOT_TEST_SWAP_OUTSIDE" "$DOT_TEST_SWAP_ROOT"
+  : > "$DOT_TEST_SWAP_MARKER"
+fi
+exec /bin/mkdir "$@"
+SH
+chmod +x "$TMP/dot-root-race-bin/mkdir"
+for harness in claude codex kimi; do
+  case "$harness" in
+    claude) root="$HOME/.claude"; trigger="$HOME/.claude/skills" ;;
+    codex) root="$HOME/.codex"; trigger="$HOME/.codex/skills" ;;
+    kimi) root="$HOME/.kimi"; trigger="$HOME/.kimi" ;;
+  esac
+  export DOT_TEST_SWAP_ROOT="$root"
+  export DOT_TEST_SWAP_TRIGGER="$trigger"
+  export DOT_TEST_SWAP_SAVED="$TMP/$harness-root-race-saved"
+  export DOT_TEST_SWAP_OUTSIDE="$TMP/$harness-root-race-outside"
+  export DOT_TEST_SWAP_MARKER="$TMP/$harness-root-race-triggered"
+  if PATH="$TMP/dot-root-race-bin:$PATH" "$HOME/.agents/.dotpanel/bin/dot" set "$harness" > "$TMP/dot-$harness-root-race.out" 2>&1; then
+    echo "FAIL: dot set $harness wrote through a root swapped after validation" >&2
+    exit 1
+  fi
+  grep -q 'path contains a symlink\|root must not be symlinked' "$TMP/dot-$harness-root-race.out"
+  test -L "$root"
+  rm "$root"
+  /bin/mv "$DOT_TEST_SWAP_SAVED" "$root"
+  rm -rf "$DOT_TEST_SWAP_OUTSIDE"
+done
+unset DOT_TEST_SWAP_ROOT DOT_TEST_SWAP_TRIGGER DOT_TEST_SWAP_SAVED DOT_TEST_SWAP_OUTSIDE DOT_TEST_SWAP_MARKER
+rm -rf "$TMP/dot-root-race-bin"
+
+mv "$HOME/.kimi/AGENTS.md" "$TMP/kimi-generated-wrapper.md"
+cat > "$HOME/.kimi/AGENTS.md" <<'EOF'
+# Personal Kimi notes
+
+This prose mentions Generated by dot configure but is not owned by dotpanel.
+EOF
+"$HOME/.agents/.dotpanel/bin/dot" unset kimi > "$TMP/dot-unset-personal-wrapper.out" 2>&1
+grep -q 'not generated by dot; leaving untouched' "$TMP/dot-unset-personal-wrapper.out"
+test -f "$HOME/.kimi/AGENTS.md"
+rm "$HOME/.kimi/AGENTS.md"
+mv "$TMP/kimi-generated-wrapper.md" "$HOME/.kimi/AGENTS.md"
 
 mkdir -p "$HOME/.codex/skills/manifest-user-owned"
 printf 'manifest transition user skill\n' > "$HOME/.codex/skills/manifest-user-owned/SKILL.md"
@@ -563,13 +746,13 @@ if "$HOME/.agents/.dotpanel/bin/dot" set claude > "$TMP/dot-set-wrapper-symlink.
   echo "FAIL: dot set accepted a symlinked generated wrapper" >&2
   exit 1
 fi
-grep -q 'Claude wrapper must not be symlinked' "$TMP/dot-set-wrapper-symlink.out"
+grep -q 'path contains a symlink\|must not be symlinked' "$TMP/dot-set-wrapper-symlink.out"
 test -L "$HOME/.claude/CLAUDE.md"
 if "$HOME/.agents/.dotpanel/bin/dot" doctor > "$TMP/dot-doctor-wrapper-symlink.out" 2>&1; then
   echo "FAIL: dot doctor accepted a symlinked generated wrapper" >&2
   exit 1
 fi
-grep -q 'Claude wrapper must not be symlinked' "$TMP/dot-doctor-wrapper-symlink.out"
+grep -q 'path contains a symlink\|must not be symlinked' "$TMP/dot-doctor-wrapper-symlink.out"
 rm "$HOME/.claude/CLAUDE.md"
 mv "$TMP/claude-wrapper-real.md" "$HOME/.claude/CLAUDE.md"
 
@@ -604,7 +787,7 @@ if "$HOME/.agents/.dotpanel/bin/dot" doctor > "$TMP/dot-doctor-env-symlink.out" 
   echo "FAIL: dot doctor accepted a symlinked shell integration file" >&2
   exit 1
 fi
-grep -q 'env file must not be symlinked' "$TMP/dot-doctor-env-symlink.out"
+grep -q 'path contains a symlink\|must not be symlinked' "$TMP/dot-doctor-env-symlink.out"
 rm "$HOME/.agents/.dotpanel/env.sh"
 mv "$TMP/env-real.sh" "$HOME/.agents/.dotpanel/env.sh"
 
@@ -884,8 +1067,104 @@ fi
 "$HOME/.agents/.dotpanel/bin/dkey" off | grep -q 'DKEY_ACTIVE_GRANT'
 
 if command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1; then
+  assert_no_sensitive_dkey_temps() {
+    if find "$HOME/.agents/secrets" "$HOME/.config/age" -maxdepth 1 -type f \
+        \( -name '.keys.env.*' -o -name 'keys.env.age.dkey-encrypt.*' -o -name '.dkey-identity.*' \) \
+        -print -quit | grep -q .; then
+      echo "FAIL: dkey left a sensitive temporary file" >&2
+      exit 1
+    fi
+  }
+
   "$HOME/.agents/.dotpanel/bin/dkey" keygen >/dev/null
   "$HOME/.agents/.dotpanel/bin/dkey" set TEST_SECRET ok
+  assert_no_sensitive_dkey_temps
+  EDITOR=true "$HOME/.agents/.dotpanel/bin/dkey" edit >/dev/null
+  assert_no_sensitive_dkey_temps
+
+  cp "$HOME/.agents/secrets/keys.env.age" "$TMP/keys-before-failed-encrypt.age"
+  mkdir -p "$TMP/dkey-failing-age-bin"
+  cat > "$TMP/dkey-failing-age-bin/age" <<'SH'
+#!/bin/sh
+if [ "${1:-}" = '-d' ]; then
+  exec "$DKEY_TEST_REAL_AGE" "$@"
+fi
+printf 'synthetic partial ciphertext\n'
+exit 9
+SH
+  chmod +x "$TMP/dkey-failing-age-bin/age"
+  if DKEY_TEST_REAL_AGE="$(command -v age)" PATH="$TMP/dkey-failing-age-bin:$PATH" \
+      "$HOME/.agents/.dotpanel/bin/dkey" set FAILED_SECRET synthetic \
+      > "$TMP/dkey-set-encrypt-failure.out" 2>&1; then
+    echo "FAIL: dkey set accepted an encryption failure" >&2
+    exit 1
+  fi
+  cmp -s "$TMP/keys-before-failed-encrypt.age" "$HOME/.agents/secrets/keys.env.age"
+  assert_no_sensitive_dkey_temps
+  rm -rf "$TMP/dkey-failing-age-bin"
+
+  mkdir -p "$TMP/dkey-editor-bin"
+  cat > "$TMP/dkey-editor-bin/fail" <<'SH'
+#!/bin/sh
+printf 'SYNTHETIC_EDITOR_VALUE=discarded\n' >> "$1"
+exit 17
+SH
+  cat > "$TMP/dkey-editor-bin/term" <<'SH'
+#!/bin/sh
+printf 'SYNTHETIC_EDITOR_VALUE=discarded\n' >> "$1"
+kill -TERM "$PPID"
+exit 0
+SH
+  chmod +x "$TMP/dkey-editor-bin/fail" "$TMP/dkey-editor-bin/term"
+  cp "$HOME/.agents/secrets/keys.env.age" "$TMP/keys-before-editor-failure.age"
+  if EDITOR="$TMP/dkey-editor-bin/fail" "$HOME/.agents/.dotpanel/bin/dkey" edit \
+      > "$TMP/dkey-edit-failure.out" 2>&1; then
+    echo "FAIL: dkey edit accepted an editor failure" >&2
+    exit 1
+  fi
+  cmp -s "$TMP/keys-before-editor-failure.age" "$HOME/.agents/secrets/keys.env.age"
+  assert_no_sensitive_dkey_temps
+  if EDITOR="$TMP/dkey-editor-bin/term" "$HOME/.agents/.dotpanel/bin/dkey" edit \
+      > "$TMP/dkey-edit-term.out" 2>&1; then
+    echo "FAIL: dkey edit continued after TERM" >&2
+    exit 1
+  else
+    dkey_edit_term_status=$?
+  fi
+  test "$dkey_edit_term_status" -eq 143
+  cmp -s "$TMP/keys-before-editor-failure.age" "$HOME/.agents/secrets/keys.env.age"
+  assert_no_sensitive_dkey_temps
+  rm -rf "$TMP/dkey-editor-bin"
+
+  printf 'original synthetic identity target\n' > "$TMP/imported-age-key.txt"
+  printf 'synthetic identity source\n' > "$TMP/import-source.txt"
+  cp "$TMP/imported-age-key.txt" "$TMP/imported-age-key-before.txt"
+  mkdir -p "$TMP/dkey-identity-bin"
+  cat > "$TMP/dkey-identity-bin/age-keygen" <<'SH'
+#!/bin/sh
+mode="$(stat -f '%Lp' "$2" 2>/dev/null || stat -c '%a' "$2")"
+[ "$mode" = '600' ] || exit 88
+: > "$DKEY_TEST_IDENTITY_MODE_MARKER"
+kill -TERM "$PPID"
+exit 0
+SH
+  chmod +x "$TMP/dkey-identity-bin/age-keygen"
+  if DKEY_AGE_IDENTITY_FILE="$TMP/imported-age-key.txt" \
+      DKEY_TEST_IDENTITY_MODE_MARKER="$TMP/dkey-identity-mode-ok" \
+      PATH="$TMP/dkey-identity-bin:$PATH" \
+      "$HOME/.agents/.dotpanel/bin/dkey" identity import "$TMP/import-source.txt" --force \
+      > "$TMP/dkey-identity-term.out" 2>&1; then
+    echo "FAIL: dkey identity import continued after TERM" >&2
+    exit 1
+  else
+    dkey_identity_term_status=$?
+  fi
+  test "$dkey_identity_term_status" -eq 143
+  test -f "$TMP/dkey-identity-mode-ok"
+  cmp -s "$TMP/imported-age-key-before.txt" "$TMP/imported-age-key.txt"
+  test -z "$(find "$TMP" -maxdepth 1 -type f -name '.dkey-identity.*' -print -quit)"
+  rm -rf "$TMP/dkey-identity-bin"
+
   "$HOME/.agents/.dotpanel/bin/dkey" list | grep -qx 'TEST_SECRET'
   # shellcheck disable=SC1090
   . "$HOME/.agents/.dotpanel/env.sh"
@@ -1283,6 +1562,22 @@ TOML
   cat > "$HOME/.codex/config.toml" <<'TOML'
 model_provider = "ok"
 model = "managed-model"
+model_providers.ok.name = "Managed"
+model_providers.ok.base_url = "https://managed.invalid/v1"
+TOML
+  printf '{"auth_mode":"apikey","OPENAI_API_KEY":"legacy-placeholder","tokens":{"access_token":"oauth-placeholder"}}\n' > "$HOME/.codex/auth.json"
+  cp "$HOME/.codex/config.toml" "$TMP/dotted-provider-config-before.toml"
+  cp "$HOME/.codex/auth.json" "$TMP/dotted-provider-auth-before.json"
+  if "$HOME/.agents/.dotpanel/bin/dkey" reset codex > "$TMP/dkey-reset-dotted-provider.out" 2>&1; then
+    echo "FAIL: dkey reset partially rewrote dotted provider keys" >&2
+    exit 1
+  fi
+  grep -q 'refusing unsupported Codex TOML table/bracket syntax' "$TMP/dkey-reset-dotted-provider.out"
+  cmp -s "$TMP/dotted-provider-config-before.toml" "$HOME/.codex/config.toml"
+  cmp -s "$TMP/dotted-provider-auth-before.json" "$HOME/.codex/auth.json"
+  cat > "$HOME/.codex/config.toml" <<'TOML'
+model_provider = "ok"
+model = "managed-model"
 [model_providers.ok]
 name = "Managed"
 [user_section]
@@ -1369,6 +1664,40 @@ TOML
   mv "$TMP/codex-reset-parent-real" "$HOME/.codex"
   test -z "$(find "$HOME" -name '*.dkey-reset.*' -print -quit)"
 
+  printf '{"env":{"ANTHROPIC_AUTH_TOKEN":"managed-placeholder","USER_OWNED_ENV":"keep"}}\n' > "$HOME/.claude/settings.json"
+  cp "$HOME/.claude/settings.json" "$TMP/reset-root-race-settings-before.json"
+  mkdir -p "$TMP/dkey-root-race-bin"
+  cat > "$TMP/dkey-root-race-bin/mktemp" <<'SH'
+#!/bin/sh
+case "${1:-}" in
+  "$HOME/.claude/settings.json.dkey-reset."*)
+    if [ ! -e "$DKEY_TEST_SWAP_MARKER" ]; then
+      /bin/mv "$HOME/.claude" "$DKEY_TEST_SWAP_SAVED"
+      /bin/mkdir -p "$DKEY_TEST_SWAP_OUTSIDE"
+      /bin/cp "$DKEY_TEST_SWAP_SAVED/settings.json" "$DKEY_TEST_SWAP_OUTSIDE/settings.json"
+      /bin/ln -s "$DKEY_TEST_SWAP_OUTSIDE" "$HOME/.claude"
+      : > "$DKEY_TEST_SWAP_MARKER"
+    fi
+    ;;
+esac
+exec /usr/bin/mktemp "$@"
+SH
+  chmod +x "$TMP/dkey-root-race-bin/mktemp"
+  export DKEY_TEST_SWAP_SAVED="$TMP/dkey-reset-root-race-saved"
+  export DKEY_TEST_SWAP_OUTSIDE="$TMP/dkey-reset-root-race-outside"
+  export DKEY_TEST_SWAP_MARKER="$TMP/dkey-reset-root-race-triggered"
+  if PATH="$TMP/dkey-root-race-bin:$PATH" "$HOME/.agents/.dotpanel/bin/dkey" reset claude > "$TMP/dkey-reset-root-race.out" 2>&1; then
+    echo "FAIL: dkey reset wrote through a root swapped after validation" >&2
+    exit 1
+  fi
+  grep -q 'Claude settings path contains a symlink' "$TMP/dkey-reset-root-race.out"
+  cmp -s "$TMP/reset-root-race-settings-before.json" "$DKEY_TEST_SWAP_SAVED/settings.json"
+  test -L "$HOME/.claude"
+  rm "$HOME/.claude"
+  /bin/mv "$DKEY_TEST_SWAP_SAVED" "$HOME/.claude"
+  rm -rf "$DKEY_TEST_SWAP_OUTSIDE" "$TMP/dkey-root-race-bin"
+  unset DKEY_TEST_SWAP_SAVED DKEY_TEST_SWAP_OUTSIDE DKEY_TEST_SWAP_MARKER
+
   printf '{"env":{"ANTHROPIC_AUTH_TOKEN":"managed-placeholder"}}\n' > "$HOME/.claude/settings.json"
   mkdir -p "$TMP/dkey-signal-bin"
   cat > "$TMP/dkey-signal-bin/mv" <<'SH'
@@ -1405,6 +1734,22 @@ SH
   fi
   grep -q 'grants file missing' "$TMP/dkey-doctor-missing-grants.out"
   mv "$HOME/.agents/secrets/dkey.conf.saved" "$HOME/.agents/secrets/dkey.conf"
+  cp "$HOME/.config/age/key.txt" "$TMP/dkey-doctor-identity-before"
+  : > "$HOME/.config/age/key.txt"
+  if "$HOME/.agents/.dotpanel/bin/dkey" doctor > "$TMP/dkey-doctor-empty-identity.out" 2>&1; then
+    echo "FAIL: dkey doctor accepted an empty age identity" >&2
+    exit 1
+  fi
+  grep -q 'age identity invalid' "$TMP/dkey-doctor-empty-identity.out"
+  mv "$TMP/dkey-doctor-identity-before" "$HOME/.config/age/key.txt"
+  cp "$HOME/.agents/secrets/keys.env.age" "$TMP/dkey-doctor-keys-before.age"
+  : > "$HOME/.agents/secrets/keys.env.age"
+  if "$HOME/.agents/.dotpanel/bin/dkey" doctor > "$TMP/dkey-doctor-empty-keys.out" 2>&1; then
+    echo "FAIL: dkey doctor accepted an empty encrypted keys file" >&2
+    exit 1
+  fi
+  grep -q 'keys file is empty or cannot be decrypted' "$TMP/dkey-doctor-empty-keys.out"
+  mv "$TMP/dkey-doctor-keys-before.age" "$HOME/.agents/secrets/keys.env.age"
   jq '.version = 2' "$TMP/providers-valid.json" > "$HOME/.agents/secrets/dkey.providers.json"
   if "$HOME/.agents/.dotpanel/bin/dkey" doctor > "$TMP/dkey-doctor-version.out" 2>&1; then
     echo "FAIL: dkey doctor accepted an unsupported registry version" >&2

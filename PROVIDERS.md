@@ -34,7 +34,7 @@ codx example "prompt"
 | Key | Type | Required | Description |
 |---|---|---|---|
 | `version` | integer | yes | Schema version. Currently `1`. |
-| `defaults` | object | yes | Harness-level defaults. |
+| `defaults` | object | no | Optional harness-level defaults; built-in paths apply when absent. |
 | `providers` | object | yes | Per-provider profiles keyed by provider name. |
 
 ### `defaults`

@@ -69,6 +69,62 @@ ensure_dirs() {
     mkdir -p "$SECRETS_DIR" "$DOT_DIR/var"
 }
 
+DKEY_SENSITIVE_ACTIVE=0
+DKEY_SENSITIVE_OLD_UMASK=""
+DKEY_SENSITIVE_TMP_PRIMARY=""
+DKEY_SENSITIVE_TMP_SECONDARY=""
+DKEY_SENSITIVE_TMP_CIPHER=""
+
+sensitive_cleanup() {
+    for sensitive_path in \
+        "${DKEY_SENSITIVE_TMP_PRIMARY:-}" \
+        "${DKEY_SENSITIVE_TMP_SECONDARY:-}" \
+        "${DKEY_SENSITIVE_TMP_CIPHER:-}"; do
+        [ -z "$sensitive_path" ] || rm -f "$sensitive_path" || true
+    done
+    DKEY_SENSITIVE_TMP_PRIMARY=""
+    DKEY_SENSITIVE_TMP_SECONDARY=""
+    DKEY_SENSITIVE_TMP_CIPHER=""
+    if [ -n "${DKEY_SENSITIVE_OLD_UMASK:-}" ]; then
+        umask "$DKEY_SENSITIVE_OLD_UMASK" || true
+    fi
+    DKEY_SENSITIVE_OLD_UMASK=""
+    DKEY_SENSITIVE_ACTIVE=0
+}
+
+sensitive_exit_cleanup() {
+    sensitive_exit_status=$?
+    trap - 0 HUP INT TERM
+    sensitive_cleanup
+    exit "$sensitive_exit_status"
+}
+
+sensitive_signal_exit() {
+    sensitive_signal_status="$1"
+    trap - 0 HUP INT TERM
+    sensitive_cleanup
+    exit "$sensitive_signal_status"
+}
+
+sensitive_begin() {
+    [ "${DKEY_SENSITIVE_ACTIVE:-0}" -eq 0 ] || fail "internal error: sensitive operation already active"
+    DKEY_SENSITIVE_OLD_UMASK="$(umask)"
+    DKEY_SENSITIVE_TMP_PRIMARY=""
+    DKEY_SENSITIVE_TMP_SECONDARY=""
+    DKEY_SENSITIVE_TMP_CIPHER=""
+    DKEY_SENSITIVE_ACTIVE=1
+    umask 077
+    trap 'sensitive_exit_cleanup' 0
+    trap 'sensitive_signal_exit 129' HUP
+    trap 'sensitive_signal_exit 130' INT
+    trap 'sensitive_signal_exit 143' TERM
+}
+
+sensitive_finish() {
+    sensitive_cleanup
+    trap - 0 HUP INT TERM
+}
+
 sample_keys() {
     if [ -f "$TEMPLATE_DIR/keys.env.template" ]; then
         cat "$TEMPLATE_DIR/keys.env.template"
@@ -146,21 +202,24 @@ identity_import_cmd() {
         fail "age identity already exists: $AGE_IDENTITY_FILE; pass --force to replace it"
     fi
 
-    mkdir -p "$(dirname "$AGE_IDENTITY_FILE")"
-    tmp="$AGE_IDENTITY_FILE.$$"
+    identity_dir="$(dirname "$AGE_IDENTITY_FILE")"
+    mkdir -p "$identity_dir"
+    sensitive_begin
+    DKEY_SENSITIVE_TMP_PRIMARY="$(mktemp "$identity_dir/.dkey-identity.XXXXXX")" || \
+        fail "could not create protected age identity import file"
     if [ "$src" = "-" ]; then
-        cat > "$tmp"
+        cat > "$DKEY_SENSITIVE_TMP_PRIMARY"
     else
         [ -f "$src" ] || fail "identity source not found: $src"
-        cp "$src" "$tmp"
+        cat "$src" > "$DKEY_SENSITIVE_TMP_PRIMARY"
     fi
 
-    age-keygen -y "$tmp" >/dev/null 2>&1 || {
-        rm -f "$tmp"
+    age-keygen -y "$DKEY_SENSITIVE_TMP_PRIMARY" >/dev/null 2>&1 || \
         fail "invalid age identity"
-    }
-    chmod 600 "$tmp"
-    mv "$tmp" "$AGE_IDENTITY_FILE"
+    chmod 600 "$DKEY_SENSITIVE_TMP_PRIMARY"
+    mv "$DKEY_SENSITIVE_TMP_PRIMARY" "$AGE_IDENTITY_FILE"
+    DKEY_SENSITIVE_TMP_PRIMARY=""
+    sensitive_finish
     info "imported age identity: $AGE_IDENTITY_FILE"
 }
 
@@ -181,14 +240,24 @@ public_recipient_from_identity() {
 }
 
 encrypt_plaintext() {
-    in="$1"
-    out="$2"
+    encrypt_input="$1"
+    encrypt_output="$2"
+    encrypt_owns_sensitive_scope=0
+    if [ "${DKEY_SENSITIVE_ACTIVE:-0}" -eq 0 ]; then
+        sensitive_begin
+        encrypt_owns_sensitive_scope=1
+    fi
     need_age
     command -v age-keygen >/dev/null 2>&1 || fail "age-keygen is required"
-    recipient="$(public_recipient_from_identity)" || fail "age identity missing at $AGE_IDENTITY_FILE"
-    tmp="$out.$$"
-    age -r "$recipient" -o "$tmp" "$in"
-    mv "$tmp" "$out"
+    encrypt_recipient="$(public_recipient_from_identity)" || fail "age identity missing at $AGE_IDENTITY_FILE"
+    DKEY_SENSITIVE_TMP_CIPHER="$(mktemp "$encrypt_output.dkey-encrypt.XXXXXX")" || \
+        fail "could not create protected encrypted keys file"
+    age -r "$encrypt_recipient" "$encrypt_input" > "$DKEY_SENSITIVE_TMP_CIPHER"
+    mv "$DKEY_SENSITIVE_TMP_CIPHER" "$encrypt_output"
+    DKEY_SENSITIVE_TMP_CIPHER=""
+    if [ "$encrypt_owns_sensitive_scope" -eq 1 ]; then
+        sensitive_finish
+    fi
 }
 
 decrypt_keys() {
@@ -238,15 +307,18 @@ set_key_cmd() {
     esac
     validate_key_name "$name"
 
-    tmp="$SECRETS_DIR/.keys.env.$$"
+    sensitive_begin
+    DKEY_SENSITIVE_TMP_PRIMARY="$(mktemp "$SECRETS_DIR/.keys.env.XXXXXX")" || \
+        fail "could not create protected plaintext keys file"
     if [ -f "$KEYS_FILE" ]; then
-        decrypt_keys > "$tmp"
+        decrypt_keys > "$DKEY_SENSITIVE_TMP_PRIMARY"
     else
-        sample_keys > "$tmp"
+        sample_keys > "$DKEY_SENSITIVE_TMP_PRIMARY"
     fi
 
-    if grep -q -E "^${name}=" "$tmp"; then
-        tmp2="$SECRETS_DIR/.keys.env.set.$$"
+    if grep -q -E "^${name}=" "$DKEY_SENSITIVE_TMP_PRIMARY"; then
+        DKEY_SENSITIVE_TMP_SECONDARY="$(mktemp "$SECRETS_DIR/.keys.env.set.XXXXXX")" || \
+            fail "could not create protected plaintext update file"
         awk -v key="$name" -v value="$value" '
             BEGIN { done = 0 }
             $0 ~ /^[[:space:]]*#/ { print; next }
@@ -261,14 +333,15 @@ set_key_cmd() {
                     print key "=" value
                 }
             }
-        ' "$tmp" > "$tmp2"
-        mv "$tmp2" "$tmp"
+        ' "$DKEY_SENSITIVE_TMP_PRIMARY" > "$DKEY_SENSITIVE_TMP_SECONDARY"
+        mv "$DKEY_SENSITIVE_TMP_SECONDARY" "$DKEY_SENSITIVE_TMP_PRIMARY"
+        DKEY_SENSITIVE_TMP_SECONDARY=""
     else
-        printf '%s=%s\n' "$name" "$value" >> "$tmp"
+        printf '%s=%s\n' "$name" "$value" >> "$DKEY_SENSITIVE_TMP_PRIMARY"
     fi
 
-    encrypt_plaintext "$tmp" "$KEYS_FILE"
-    rm -f "$tmp"
+    encrypt_plaintext "$DKEY_SENSITIVE_TMP_PRIMARY" "$KEYS_FILE"
+    sensitive_finish
     info "set $name in $KEYS_FILE"
 }
 
@@ -316,15 +389,17 @@ init_cmd() {
 edit_cmd() {
     ensure_dirs
     editor="${EDITOR:-vi}"
-    tmp="$SECRETS_DIR/.keys.env.$$"
+    sensitive_begin
+    DKEY_SENSITIVE_TMP_PRIMARY="$(mktemp "$SECRETS_DIR/.keys.env.XXXXXX")" || \
+        fail "could not create protected plaintext keys file"
     if [ -f "$KEYS_FILE" ]; then
-        decrypt_keys > "$tmp"
+        decrypt_keys > "$DKEY_SENSITIVE_TMP_PRIMARY"
     else
-        sample_keys > "$tmp"
+        sample_keys > "$DKEY_SENSITIVE_TMP_PRIMARY"
     fi
-    "$editor" "$tmp"
-    encrypt_plaintext "$tmp" "$KEYS_FILE"
-    rm -f "$tmp"
+    "$editor" "$DKEY_SENSITIVE_TMP_PRIMARY"
+    encrypt_plaintext "$DKEY_SENSITIVE_TMP_PRIMARY" "$KEYS_FILE"
+    sensitive_finish
     info "updated $KEYS_FILE"
 }
 
@@ -582,18 +657,19 @@ reset_cmd() {
             settings_path="$(expand_home_path "$settings_value")"
             validate_reset_target_path "$settings_path" "Claude settings"
             if [ -f "$settings_path" ]; then
-                mkdir -p "$(dirname "$settings_path")"
                 managed_keys="$(jq -ce '[
                     (.defaults.claude.managed_env_keys // [])[],
                     ((.defaults.claude.settings.env // {}) | keys[]),
                     ((.providers[]?.profiles[]?.claude?.settings?.env // {}) | keys[])
                 ] | unique | select(all(.[]; type == "string"))' "$PROVIDERS_FILE")" || \
                     reset_abort "invalid Claude managed env declarations in providers registry"
+                validate_reset_target_path "$settings_path" "Claude settings"
                 jq -e 'type == "object" and ((.env? == null) or ((.env | type) == "object"))' \
                     "$settings_path" >/dev/null 2>&1 || \
                     reset_abort "Claude settings file is not a JSON object: $settings_path"
                 claude_reset_tmp="$(mktemp "$settings_path.dkey-reset.XXXXXX")" || \
                     reset_abort "could not create Claude reset file beside: $settings_path"
+                validate_reset_target_path "$settings_path" "Claude settings"
                 jq --argjson keys "$managed_keys" '
                     .env = ((.env // {}) | with_entries(
                         select(.key as $key | ($keys | index($key) | not))
@@ -621,7 +697,9 @@ reset_cmd() {
             fi
             if [ -f "$config_path" ] && ! awk '
                 /^[[:space:]]*\[/ { in_table = 1 }
+                /^[[:space:]]*\[\[/ { invalid = 1 }
                 /=[[:space:]]*\[[[:space:]]*(#.*)?$/ { invalid = 1 }
+                /^[[:space:]]*model_providers([[:space:]]*=|\.)/ { invalid = 1 }
                 /^[[:space:]]*\[/ &&
                     $0 !~ /^[[:space:]]*\[[A-Za-z0-9_.-]+\][[:space:]]*(#.*)?$/ {
                     invalid = 1
@@ -656,7 +734,7 @@ reset_cmd() {
                     reset_abort "could not read Codex provider IDs from providers registry"
             clear_codex_auth=0
             if [ -f "$config_path" ]; then
-                mkdir -p "$(dirname "$config_path")"
+                validate_reset_target_path "$config_path" "Codex config"
                 current_provider="$(awk '
                     /^[[:space:]]*\[/ { exit }
                     /^[[:space:]]*model_provider[[:space:]]*=/ {
@@ -679,6 +757,7 @@ reset_cmd() {
                 fi
                 codex_reset_tmp="$(mktemp "$config_path.dkey-reset.XXXXXX")" || \
                     reset_abort "could not create Codex reset file beside: $config_path"
+                validate_reset_target_path "$config_path" "Codex config"
                 awk -v managed_file="$managed_providers" -v clear_top="$clear_top" '
                     BEGIN {
                         top = 1
@@ -711,6 +790,7 @@ reset_cmd() {
                     reset_abort "Codex auth file is not a JSON object: $auth_path"
                 codex_auth_reset_tmp="$(mktemp "$auth_path.dkey-reset.XXXXXX")" || \
                     reset_abort "could not create Codex auth reset file beside: $auth_path"
+                validate_reset_target_path "$auth_path" "Codex auth"
                 jq 'if .auth_mode == "apikey" then del(.auth_mode, .OPENAI_API_KEY) else . end' \
                     "$auth_path" > "$codex_auth_reset_tmp" || \
                     reset_abort "could not prepare Codex auth reset: $auth_path"
@@ -724,18 +804,21 @@ reset_cmd() {
     reset_codex_changed=0
     reset_auth_changed=0
     if [ -n "$claude_reset_tmp" ]; then
+        validate_reset_target_path "$settings_path" "Claude settings"
         mv "$claude_reset_tmp" "$settings_path" || \
             reset_abort "could not install Claude settings reset: $settings_path"
         claude_reset_tmp=""
         reset_claude_changed=1
     fi
     if [ -n "$codex_reset_tmp" ]; then
+        validate_reset_target_path "$config_path" "Codex config"
         mv "$codex_reset_tmp" "$config_path" || \
             reset_abort "could not install Codex config reset: $config_path"
         codex_reset_tmp=""
         reset_codex_changed=1
     fi
     if [ -n "$codex_auth_reset_tmp" ]; then
+        validate_reset_target_path "$auth_path" "Codex auth"
         mv "$codex_auth_reset_tmp" "$auth_path" || \
             reset_abort "could not install Codex auth reset: $auth_path"
         codex_auth_reset_tmp=""
@@ -880,14 +963,36 @@ doctor_cmd() {
     command -v age >/dev/null 2>&1 && info "age found" || { warn "age missing"; problems=$((problems + 1)); }
     command -v age-keygen >/dev/null 2>&1 && info "age-keygen found" || { warn "age-keygen missing"; problems=$((problems + 1)); }
     command -v jq >/dev/null 2>&1 && info "jq found" || { warn "jq missing"; problems=$((problems + 1)); }
-    [ -f "$AGE_IDENTITY_FILE" ] && info "age identity exists: $AGE_IDENTITY_FILE" || {
+    if [ ! -f "$AGE_IDENTITY_FILE" ]; then
         warn "age identity missing: $AGE_IDENTITY_FILE"
         problems=$((problems + 1))
-    }
-    [ -f "$KEYS_FILE" ] && info "keys file exists: $KEYS_FILE" || {
+    elif [ ! -s "$AGE_IDENTITY_FILE" ]; then
+        warn "age identity invalid: $AGE_IDENTITY_FILE"
+        problems=$((problems + 1))
+    elif command -v age-keygen >/dev/null 2>&1 && \
+        ! age-keygen -y "$AGE_IDENTITY_FILE" >/dev/null 2>&1; then
+        warn "age identity invalid: $AGE_IDENTITY_FILE"
+        problems=$((problems + 1))
+    elif command -v age-keygen >/dev/null 2>&1; then
+        info "age identity valid: $AGE_IDENTITY_FILE"
+    else
+        info "age identity exists; validation unavailable: $AGE_IDENTITY_FILE"
+    fi
+    if [ ! -f "$KEYS_FILE" ]; then
         warn "keys file missing: $KEYS_FILE"
         problems=$((problems + 1))
-    }
+    elif [ ! -s "$KEYS_FILE" ]; then
+        warn "keys file is empty or cannot be decrypted: $KEYS_FILE"
+        problems=$((problems + 1))
+    elif command -v age >/dev/null 2>&1 && [ -s "$AGE_IDENTITY_FILE" ] && \
+        ! age -d -i "$AGE_IDENTITY_FILE" "$KEYS_FILE" >/dev/null 2>&1; then
+        warn "keys file is empty or cannot be decrypted: $KEYS_FILE"
+        problems=$((problems + 1))
+    elif command -v age >/dev/null 2>&1 && [ -s "$AGE_IDENTITY_FILE" ]; then
+        info "keys file decrypts: $KEYS_FILE"
+    else
+        info "keys file exists; decrypt check unavailable: $KEYS_FILE"
+    fi
     [ -f "$GRANTS_FILE" ] && info "grants file exists: $GRANTS_FILE" || {
         warn "grants file missing: $GRANTS_FILE"
         problems=$((problems + 1))

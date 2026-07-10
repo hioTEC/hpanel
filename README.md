@@ -156,6 +156,11 @@ dot self update
 Rendered harness entries are deliberately tiny. They tell the harness to read
 `~/.agents/AGENTS.md`; they do not duplicate your private rules.
 
+Shell rc mutation is fail-closed: `dot set path` and `dot unset path` refuse a
+symlinked or non-regular rc file, recheck its mutation boundary, preserve the
+mode of an existing file, and clean same-directory rewrite files after failure
+or signal. `DOT_SHELL_RC` and `ZDOTDIR` may still select an rc outside `HOME`.
+
 Claude plugin rendering accepts only path-safe skill IDs, closed frontmatter
 with one `name` and `description`, and source trees without symlinks. Generated
 plugins carry a regular `.dotpanel-owner` marker. Reconciliation, doctor, and
@@ -227,6 +232,10 @@ dkey set NAME VALUE
 dkey set NAME=VALUE
 dkey list
 ```
+
+`dkey set`, `dkey edit`, and identity import keep sensitive intermediates in
+random `0600` files and remove them on success, failure, or HUP/INT/TERM. The
+encrypted keys or identity target is replaced only after validation succeeds.
 
 It can inject those secrets into one command:
 

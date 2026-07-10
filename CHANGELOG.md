@@ -51,12 +51,25 @@
 - `dot self update` now refuses dirty managed checkouts before pulling.
 - Render/reset signal handlers now clean staging and terminate with the signal
   status instead of resuming a cancelled mutation.
+- `dkey set`, `dkey edit`, and identity import now use distinct random `0600`
+  temporary files, preserve the encrypted target on failure, and remove
+  plaintext/private-key material on normal exit or HUP/INT/TERM.
+- Shell rc injection/removal now refuses symlinks and non-regular files,
+  revalidates the mutation boundary, preserves an existing rc file's mode, and
+  cleans same-directory rewrite files on failure or signal.
 - Codex alias apply rechecks ownership after preflight; a concurrent unmanaged
   replacement is preserved and fails closed.
+- Generated harness roots are revalidated after directory creation and before
+  replacement. Wrapper unset requires the exact generated first-line marker,
+  and skill frontmatter rejects malformed block headers and non-string YAML
+  scalars consistently with the memspace checker.
+- `dkey reset codex` fails closed on dotted `model_providers.*` keys and
+  array-of-table syntax instead of partially removing managed provider state.
 - `dot doctor` now exits non-zero for a missing memspace entry, wrapper or
   `env.sh` drift, unsafe generated-file types, or generated Claude plugins that
   differ from their source render. `dkey doctor` uses the same versioned schema
-  as reset and treats missing operational inputs as failures.
+  as reset, validates the age identity and encrypted-key decryptability, and
+  treats missing or empty operational inputs as failures.
 - jq 1.8.1 compatibility in `write_claude_use`.
 
 ## 0.0.1 — 2026-05-14

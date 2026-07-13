@@ -1,12 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — 2026-07-13
 
 ### Changed
 - **Breaking:** persistent backend switching via `dkey use` has been removed.
-  Use per-invocation wrappers (`claw`/`clawb`, `codx`/`codxb`, `gem`/`gemb`)
-  instead; they read `dkey.providers.json` and load secrets through grants
-  without rewriting global harness config or Codex auth state.
+  Use per-invocation wrappers (`claw`/`clawb`) instead; they read
+  `dkey.providers.json` and load secrets through grants without rewriting
+  global harness config or Codex auth state.
+- `dot init` template now documents `dot doctor`, `dot self`, `dkey grants`,
+  and puts `dkey run` first as the only functional credential path for
+  non-interactive agents.
 - **Breaking:** unscoped `dkey on` activation is disabled. Current-shell
   activation now requires one or more `--with GRANT` scopes.
 
@@ -20,9 +23,13 @@
   grant injects (never secret values); `grant not found` errors list available grants.
 - `dkey identity import PATH [--force]` and `dkey identity import --stdin [--force]`
   for importing an existing age identity.
-- `dot init`/`dot set path` add `~/.agents/tools/bin` to PATH via `env.sh`, so the
-  `claw`/`clawb` (claude) and `codx`/`codxb` (codex) multi-call scripts resolve
-  there — per-invocation backend switch from `dkey.providers.json`, no shell aliases.
+- `dot init`/`dot set path` add `~/.agents/tools/bin` to PATH via `env.sh`, so
+  multi-call scripts like `claw`/`clawb` resolve there — per-invocation backend
+  switch from `dkey.providers.json`, no shell aliases.
+- `dkey shell on|off` surfaced in `dkey help` (previously dispatch-only; it is
+  the internal backend the dot-installed shell function evals).
+- Rendered Claude plugin manifests now carry a `version` field (the dotpanel
+  version).
 
 ### Removed
 - Public apt/brew packaging (`debian/`, `homebrew/`) and their README install

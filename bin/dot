@@ -8,7 +8,7 @@
 
 set -eu
 
-VERSION="0.1.0-vnext"
+VERSION="0.1.0"
 
 HOME_DIR="${HOME:?HOME is required}"
 AGENTS_DIR="${DOT_AGENTS_DIR:-$HOME_DIR/.agents}"
@@ -454,6 +454,11 @@ Use `dot set -a` after editing `~/.agents/AGENTS.md` or after pulling memspace
 changes. It renders the managed Claude, Codex, and Kimi entry files. Use
 `dot set claude`, `dot set codex`, or `dot set kimi` for one harness.
 
+Use `dot doctor` for a read-only wiring check (entry wrappers, rendered
+plugins, aliases, PATH, dependencies); run it after entry, skill, or routing
+changes. Use `dot self status` / `dot self update` to inspect and update the
+managed dotpanel checkout itself.
+
 Use `dot sync status`, `dot sync diff`, `dot sync pull`, and `dot sync push` to
 move the memspace repo across machines. `dot sync pull` fetches, requires a
 clean worktree and a fast-forward path, recursively initializes/updates
@@ -462,8 +467,15 @@ and pushes existing commits only; it never stages or commits files.
 
 Use `dkey keygen` once to create the local age identity. Use
 `dkey set NAME VALUE` or `dkey set NAME=VALUE` to create or overwrite encrypted
-keys, `dkey list` to list key names, `dkey on --with GRANT` for a scoped current
-shell, and `dkey off` to remove variables set by `dkey on`.
+keys, and `dkey list` to list key names.
+
+Discover grant names with `dkey grants`; it prints each grant and the env vars
+it injects, never secret values. Inject credentials with
+`dkey run --with GRANT -- COMMAND`. For a non-interactive agent that is the
+only functional path — each agent command runs in a fresh shell, so `dkey on`
+exports die with the call. Use `dkey on --with GRANT` only for an authorized
+interactive shell and `dkey off` to remove what it set. `dkey status` and
+`dkey doctor` are read-only health checks.
 
 ## Layout
 
@@ -834,6 +846,7 @@ _gen_plugin_flat() {
 {
   "name": "$plugin_name",
   "description": "$plugin_name skills from memspace",
+  "version": "$VERSION",
   "author": { "name": "dot" }
 }
 PLUGINJSON

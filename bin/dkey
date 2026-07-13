@@ -3,7 +3,7 @@
 
 set -eu
 
-VERSION="0.1.0-vnext"
+VERSION="0.1.0"
 
 HOME_DIR="${HOME:?HOME is required}"
 AGENTS_DIR="${DOT_AGENTS_DIR:-$HOME_DIR/.agents}"
@@ -39,6 +39,7 @@ Usage:
   dkey run --with GRANT [--with GRANT...] -- COMMAND [ARGS...]
   dkey on --with GRANT [--with GRANT...]
   dkey off
+  dkey shell on [--with GRANT...] | dkey shell off
   dkey version
   dkey help
 
@@ -46,6 +47,8 @@ Shell integration:
   `dot init` installs a shell function that evals `dkey on/off` in the current
   shell. Direct `dkey on` refuses to print secret-bearing shell code.
   `dkey on --with GRANT` exports only that grant; `dkey off` removes variables it set.
+  `dkey shell on/off` is the internal backend that shell function evals; it is
+  not meant for direct use.
 EOF
 }
 

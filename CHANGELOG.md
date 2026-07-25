@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- `dkey edit -h` and `dkey edit --help` now return usage before decrypting the
+  keys file or invoking an editor; unexpected edit arguments fail closed.
+
 ## 0.1.0 — 2026-07-13
 
 ### Changed

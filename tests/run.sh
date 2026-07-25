@@ -1456,6 +1456,20 @@ SH
   assert_no_sensitive_dkey_temps
   EDITOR=true "$HOME/.agents/.dotpanel/bin/dkey" edit >/dev/null
   assert_no_sensitive_dkey_temps
+  cp "$HOME/.agents/secrets/keys.env.age" "$TMP/keys-before-edit-help.age"
+  EDITOR=false "$HOME/.agents/.dotpanel/bin/dkey" edit --help \
+      > "$TMP/dkey-edit-help.out"
+  grep -qxF 'Usage: dkey edit' "$TMP/dkey-edit-help.out"
+  cmp -s "$TMP/keys-before-edit-help.age" "$HOME/.agents/secrets/keys.env.age"
+  assert_no_sensitive_dkey_temps
+  if EDITOR=false "$HOME/.agents/.dotpanel/bin/dkey" edit unexpected \
+      > "$TMP/dkey-edit-argument.out" 2>&1; then
+    echo "FAIL: dkey edit accepted an unexpected argument" >&2
+    exit 1
+  fi
+  grep -qxF 'FAIL  usage: dkey edit' "$TMP/dkey-edit-argument.out"
+  cmp -s "$TMP/keys-before-edit-help.age" "$HOME/.agents/secrets/keys.env.age"
+  assert_no_sensitive_dkey_temps
 
   ln -s "$HOME/.config/age/key.txt" "$TMP/doctor-identity-link"
   if DKEY_AGE_IDENTITY_FILE="$TMP/doctor-identity-link" \

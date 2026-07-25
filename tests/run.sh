@@ -1457,11 +1457,15 @@ SH
   EDITOR=true "$HOME/.agents/.dotpanel/bin/dkey" edit >/dev/null
   assert_no_sensitive_dkey_temps
   cp "$HOME/.agents/secrets/keys.env.age" "$TMP/keys-before-edit-help.age"
-  EDITOR=false "$HOME/.agents/.dotpanel/bin/dkey" edit --help \
-      > "$TMP/dkey-edit-help.out"
-  grep -qxF 'Usage: dkey edit' "$TMP/dkey-edit-help.out"
+  for edit_help_flag in -h --help; do
+    DKEY_KEYS_FILE="$TMP/missing-edit-help-keys.age" \
+        DKEY_AGE_IDENTITY_FILE="$TMP/missing-edit-help-identity.txt" \
+        EDITOR=false "$HOME/.agents/.dotpanel/bin/dkey" edit "$edit_help_flag" \
+        > "$TMP/dkey-edit-help.out"
+    grep -qxF 'Usage: dkey edit' "$TMP/dkey-edit-help.out"
+    assert_no_sensitive_dkey_temps
+  done
   cmp -s "$TMP/keys-before-edit-help.age" "$HOME/.agents/secrets/keys.env.age"
-  assert_no_sensitive_dkey_temps
   if EDITOR=false "$HOME/.agents/.dotpanel/bin/dkey" edit unexpected \
       > "$TMP/dkey-edit-argument.out" 2>&1; then
     echo "FAIL: dkey edit accepted an unexpected argument" >&2
